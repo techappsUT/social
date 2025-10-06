@@ -15,9 +15,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - socialqueue-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U socialqueue"]
+      test: ["CMD-SHELL", "pg_isready -U socialqueue -d socialqueue_dev"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,24 +32,121 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    networks:
+      - socialqueue-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    command: redis-server --appendonly yes
 
-  # Uncomment when ready to run backend in Docker
-  # backend:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: socialqueue-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: socialqueue
+      DB_PASSWORD: socialqueue_dev_password
+      DB_NAME: socialqueue_dev
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # JWT Secrets (DEV ONLY - Change in production!)
+      JWT_ACCESS_SECRET: dev-access-secret-change-in-production-min-32-chars
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production-min-32-chars
+      JWT_ISSUER: socialqueue-dev
+      
+      # Server
+      PORT: 8080
+      BASE_URL: http://localhost:3000
+      API_BASE_URL: http://localhost:8080
+      ENV: development
+      
+      # Email (Mock for dev)
+      SMTP_HOST: smtp.mailtrap.io
+      SMTP_PORT: 2525
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      EMAIL_FROM: noreply@socialqueue.local
+      
+      # Social Media APIs (for future use)
+      TWITTER_CLIENT_ID: ""
+      TWITTER_CLIENT_SECRET: ""
+      FACEBOOK_APP_ID: ""
+      FACEBOOK_APP_SECRET: ""
+      
+      # Storage
+      STORAGE_DRIVER: local
+      UPLOAD_DIR: /app/uploads
+      
+      # Monitoring
+      LOG_LEVEL: debug
+      ENABLE_PROFILING: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - backend-uploads:/app/uploads
+    networks:
+      - socialqueue-network
+    # Uncomment when Dockerfile.dev is ready
+    # command: make run
+
+  # Frontend Next.js Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: socialqueue-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - NODE_ENV=development
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - socialqueue-network
+    # Uncomment when Dockerfile.dev is ready
+    # command: pnpm dev
+
+  # Background Worker (optional - for processing queued jobs)
+  # worker:
   #   build:
   #     context: ./backend
   #     dockerfile: Dockerfile.dev
-  #   container_name: socialqueue-backend
+  #   container_name: socialqueue-worker
   #   restart: unless-stopped
-  #   ports:
-  #     - "8080:8080"
   #   environment:
-  #     - DATABASE_URL=postgres://socialqueue:socialqueue_dev_password@postgres:5432/socialqueue_dev?sslmode=disable
-  #     - REDIS_URL=redis://redis:6379
+  #     # Same as backend
+  #     DB_HOST: postgres
+  #     DB_PORT: 5432
+  #     DB_USER: socialqueue
+  #     DB_PASSWORD: socialqueue_dev_password
+  #     DB_NAME: socialqueue_dev
+  #     REDIS_HOST: redis
+  #     REDIS_PORT: 6379
+  #     LOG_LEVEL: debug
   #   depends_on:
   #     postgres:
   #       condition: service_healthy
@@ -55,26 +154,47 @@ services:
   #       condition: service_healthy
   #   volumes:
   #     - ./backend:/app
-  #   command: make run
+  #   networks:
+  #     - socialqueue-network
+  #   command: make run-worker
 
-  # Uncomment when ready to run frontend in Docker
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile.dev
-  #   container_name: socialqueue-frontend
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     - NEXT_PUBLIC_API_URL=http://localhost:8080
-  #   depends_on:
-  #     - backend
-  #   volumes:
-  #     - ./frontend:/app
-  #     - /app/node_modules
-  #   command: npm run dev
+  # Adminer - Database Management UI (optional)
+  adminer:
+    image: adminer:latest
+    container_name: socialqueue-adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha
+    networks:
+      - socialqueue-network
+    depends_on:
+      - postgres
+
+  # Redis Commander - Redis Management UI (optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: socialqueue-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    networks:
+      - socialqueue-network
+    depends_on:
+      - redis
+
+networks:
+  socialqueue-network:
+    driver: bridge
 
 volumes:
   postgres-data:
+    driver: local
   redis-data:
+    driver: local
+  backend-uploads:
+    driver: local

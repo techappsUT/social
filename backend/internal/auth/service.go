@@ -8,7 +8,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/techappsUT/social-queue/internal/dto"
@@ -40,7 +39,7 @@ func NewService(db *gorm.DB, tokenService *TokenService, emailService email.Serv
 }
 
 // Signup creates a new user account
-func (s *Service) Signup(req dto.SignupRequest) (*models.User, error) {
+func (s *Service) Signup(req dto.SignupRequest) (*dto.MessageResponse, error) {
 	// Check if user exists
 	var existingUser models.User
 	if err := s.db.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
@@ -75,10 +74,13 @@ func (s *Service) Signup(req dto.SignupRequest) (*models.User, error) {
 		return nil, err
 	}
 
-	// Send verification email
+	// Send verification email (async)
 	go s.emailService.SendVerificationEmail(user.Email, verificationToken)
 
-	return &user, nil
+	return &dto.MessageResponse{
+		Message: "Account created successfully. Please check your email to verify your account.",
+		Success: true,
+	}, nil
 }
 
 // Login authenticates a user and returns tokens
@@ -96,7 +98,7 @@ func (s *Service) Login(req dto.LoginRequest) (*dto.AuthResponse, error) {
 		return nil, ErrInvalidCredentials
 	}
 
-	// Optional: Check if email is verified
+	// Optional: Check if email is verified (uncomment if required)
 	// if !user.EmailVerified {
 	// 	return nil, ErrEmailNotVerified
 	// }
@@ -117,7 +119,7 @@ func (s *Service) Login(req dto.LoginRequest) (*dto.AuthResponse, error) {
 	dbRefreshToken := models.RefreshToken{
 		UserID:    user.ID,
 		TokenHash: refreshTokenHash,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
 	}
 	if err := s.db.Create(&dbRefreshToken).Error; err != nil {
 		return nil, err
@@ -128,102 +130,52 @@ func (s *Service) Login(req dto.LoginRequest) (*dto.AuthResponse, error) {
 	user.LastLoginAt = &now
 	s.db.Save(&user)
 
+	// Build response with aligned format
+	// teamIDStr := ""
+	// if user.TeamID != nil {
+	// 	teamIDStr = user.TeamID.String()
+	// }
+
 	return &dto.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		User:         mapUserToUserInfo(&user),
+		User: dto.NewUserInfo(
+			user.ID.String(),
+			user.Email,
+			user.FirstName,
+			user.LastName,
+			string(user.Role),
+			func() *string {
+				if user.TeamID != nil {
+					s := user.TeamID.String()
+					return &s
+				}
+				return nil
+			}(),
+			user.EmailVerified,
+		),
 	}, nil
 }
 
-// VerifyEmail verifies user's email address
-func (s *Service) VerifyEmail(token string) error {
-	var user models.User
-	if err := s.db.Where("verification_token = ? AND verification_token_expires_at > ?",
-		token, time.Now()).First(&user).Error; err != nil {
-		return ErrInvalidToken
-	}
-
-	user.EmailVerified = true
-	user.VerificationToken = nil
-	user.VerificationTokenExpiresAt = nil
-
-	return s.db.Save(&user).Error
-}
-
-// ForgotPassword generates a password reset token
-func (s *Service) ForgotPassword(email string) error {
-	var user models.User
-	if err := s.db.Where("email = ? AND deleted_at IS NULL", email).First(&user).Error; err != nil {
-		// Don't reveal if user exists
-		return nil
-	}
-
-	resetToken, err := GenerateSecureToken(32)
-	if err != nil {
-		return err
-	}
-
-	tokenExpiry := time.Now().Add(1 * time.Hour)
-	user.ResetToken = &resetToken
-	user.ResetTokenExpiresAt = &tokenExpiry
-
-	if err := s.db.Save(&user).Error; err != nil {
-		return err
-	}
-
-	// Send reset email
-	go s.emailService.SendPasswordResetEmail(user.Email, resetToken)
-
-	return nil
-}
-
-// ResetPassword resets user password using reset token
-func (s *Service) ResetPassword(token, newPassword string) error {
-	var user models.User
-	if err := s.db.Where("reset_token = ? AND reset_token_expires_at > ?",
-		token, time.Now()).First(&user).Error; err != nil {
-		return ErrInvalidToken
-	}
-
-	passwordHash, err := HashPassword(newPassword)
-	if err != nil {
-		return err
-	}
-
-	user.PasswordHash = passwordHash
-	user.ResetToken = nil
-	user.ResetTokenExpiresAt = nil
-
-	// Revoke all refresh tokens for security
-	s.db.Model(&models.RefreshToken{}).Where("user_id = ?", user.ID).Update("revoked", true)
-
-	return s.db.Save(&user).Error
-}
-
-// RefreshAccessToken generates a new access token using refresh token
-func (s *Service) RefreshAccessToken(refreshToken string) (*dto.AuthResponse, error) {
+// RefreshToken generates new access token using refresh token
+func (s *Service) RefreshToken(refreshToken string) (*dto.AuthResponse, error) {
 	// Validate refresh token
 	claims, err := s.tokenService.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return nil, err
 	}
 
-	userID, err := uuid.Parse(claims.UserID)
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-
-	// Check if refresh token exists and not revoked
-	refreshTokenHash := hashToken(refreshToken)
+	// Check if refresh token exists and is not revoked
+	tokenHash := hashToken(refreshToken)
 	var dbToken models.RefreshToken
 	if err := s.db.Where("token_hash = ? AND user_id = ? AND revoked = false AND expires_at > ?",
-		refreshTokenHash, userID, time.Now()).First(&dbToken).Error; err != nil {
-		return nil, ErrRefreshTokenRevoked
+		tokenHash, claims.UserID, time.Now()).First(&dbToken).Error; err != nil {
+		return nil, ErrInvalidToken
 	}
 
 	// Get user
 	var user models.User
-	if err := s.db.Where("id = ? AND deleted_at IS NULL", userID).First(&user).Error; err != nil {
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", claims.UserID).First(&user).Error; err != nil {
 		return nil, ErrUserNotFound
 	}
 
@@ -233,41 +185,187 @@ func (s *Service) RefreshAccessToken(refreshToken string) (*dto.AuthResponse, er
 		return nil, err
 	}
 
+	// Optionally rotate refresh token (recommended for security)
+	newRefreshToken, err := s.tokenService.GenerateRefreshToken(user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Revoke old refresh token
+	dbToken.Revoked = true
+	s.db.Save(&dbToken)
+
+	// Store new refresh token
+	newTokenHash := hashToken(newRefreshToken)
+	newDBToken := models.RefreshToken{
+		UserID:    user.ID,
+		TokenHash: newTokenHash,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}
+	s.db.Create(&newDBToken)
+
 	return &dto.AuthResponse{
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		User:         mapUserToUserInfo(&user),
+		RefreshToken: newRefreshToken,
+		User: dto.NewUserInfo(
+			user.ID.String(),
+			user.Email,
+			user.FirstName,
+			user.LastName,
+			string(user.Role),
+			func() *string {
+				if user.TeamID != nil {
+					s := user.TeamID.String()
+					return &s
+				}
+				return nil
+			}(),
+			user.EmailVerified,
+		),
 	}, nil
 }
 
-// RevokeRefreshToken revokes a refresh token
-func (s *Service) RevokeRefreshToken(refreshToken string) error {
-	refreshTokenHash := hashToken(refreshToken)
+// VerifyEmail verifies user's email address
+func (s *Service) VerifyEmail(token string) (*dto.MessageResponse, error) {
+	var user models.User
+	if err := s.db.Where("verification_token = ? AND verification_token_expires_at > ?",
+		token, time.Now()).First(&user).Error; err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	user.EmailVerified = true
+	user.VerificationToken = nil
+	user.VerificationTokenExpiresAt = nil
+
+	if err := s.db.Save(&user).Error; err != nil {
+		return nil, err
+	}
+
+	return &dto.MessageResponse{
+		Message: "Email verified successfully!",
+		Success: true,
+	}, nil
+}
+
+// ResendVerification resends email verification link
+func (s *Service) ResendVerification(email string) (*dto.MessageResponse, error) {
+	var user models.User
+	if err := s.db.Where("email = ? AND deleted_at IS NULL", email).First(&user).Error; err != nil {
+		// Don't reveal if user exists - security best practice
+		return &dto.MessageResponse{
+			Message: "If an account with that email exists and is unverified, a verification email has been sent.",
+			Success: true,
+		}, nil
+	}
+
+	// Check if already verified
+	if user.EmailVerified {
+		return &dto.MessageResponse{
+			Message: "This email is already verified. You can login now.",
+			Success: true,
+		}, nil
+	}
+
+	// Generate new verification token
+	verificationToken, err := GenerateSecureToken(32)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenExpiry := time.Now().Add(24 * time.Hour)
+	user.VerificationToken = &verificationToken
+	user.VerificationTokenExpiresAt = &tokenExpiry
+
+	if err := s.db.Save(&user).Error; err != nil {
+		return nil, err
+	}
+
+	// Send verification email (async)
+	go s.emailService.SendVerificationEmail(user.Email, verificationToken)
+
+	return &dto.MessageResponse{
+		Message: "If an account with that email exists and is unverified, a verification email has been sent.",
+		Success: true,
+	}, nil
+}
+
+// ForgotPassword generates a password reset token
+func (s *Service) ForgotPassword(email string) (*dto.MessageResponse, error) {
+	var user models.User
+	if err := s.db.Where("email = ? AND deleted_at IS NULL", email).First(&user).Error; err != nil {
+		// Don't reveal if user exists - security best practice
+		return &dto.MessageResponse{
+			Message: "If an account with that email exists, a password reset link has been sent.",
+			Success: true,
+		}, nil
+	}
+
+	resetToken, err := GenerateSecureToken(32)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenExpiry := time.Now().Add(1 * time.Hour)
+	user.ResetToken = &resetToken
+	user.ResetTokenExpiresAt = &tokenExpiry
+
+	if err := s.db.Save(&user).Error; err != nil {
+		return nil, err
+	}
+
+	// Send reset email (async)
+	go s.emailService.SendPasswordResetEmail(user.Email, resetToken)
+
+	return &dto.MessageResponse{
+		Message: "If an account with that email exists, a password reset link has been sent.",
+		Success: true,
+	}, nil
+}
+
+// ResetPassword resets user password using reset token
+func (s *Service) ResetPassword(token, newPassword string) (*dto.MessageResponse, error) {
+	var user models.User
+	if err := s.db.Where("reset_token = ? AND reset_token_expires_at > ?",
+		token, time.Now()).First(&user).Error; err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	passwordHash, err := HashPassword(newPassword)
+	if err != nil {
+		return nil, err
+	}
+
+	user.PasswordHash = passwordHash
+	user.ResetToken = nil
+	user.ResetTokenExpiresAt = nil
+
+	if err := s.db.Save(&user).Error; err != nil {
+		return nil, err
+	}
+
+	// Revoke all refresh tokens for security
+	s.db.Model(&models.RefreshToken{}).Where("user_id = ?", user.ID).Update("revoked", true)
+
+	return &dto.MessageResponse{
+		Message: "Password reset successfully. Please login with your new password.",
+		Success: true,
+	}, nil
+}
+
+// Logout revokes the refresh token
+func (s *Service) Logout(refreshToken string) error {
+	if refreshToken == "" {
+		return nil // Already logged out
+	}
+
+	tokenHash := hashToken(refreshToken)
 	return s.db.Model(&models.RefreshToken{}).
-		Where("token_hash = ?", refreshTokenHash).
+		Where("token_hash = ?", tokenHash).
 		Update("revoked", true).Error
 }
 
-// Helper functions
+// Helper function to hash tokens for storage
 func hashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])
-}
-
-func mapUserToUserInfo(user *models.User) *dto.UserInfo {
-	var teamID *string
-	if user.TeamID != nil {
-		teamIDStr := user.TeamID.String()
-		teamID = &teamIDStr
-	}
-
-	return &dto.UserInfo{
-		ID:            user.ID.String(),
-		Email:         user.Email,
-		FirstName:     user.FirstName,
-		LastName:      user.LastName,
-		Role:          string(user.Role),
-		TeamID:        teamID,
-		EmailVerified: user.EmailVerified,
-	}
 }

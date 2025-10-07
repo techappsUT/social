@@ -1,87 +1,70 @@
 // path: frontend/src/hooks/useAuth.ts
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import { apiClient } from '@/lib/api-client';
+import type {
+  LoginCredentials,
+  SignupCredentials,
+  AuthResponse,
+  UserInfo,
+  MessageResponse,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  VerifyEmailRequest,
+} from '@/types/auth';
 
-// Types
-export interface LoginCredentials {
-  email: string;
-  password: string;
-}
-
-export interface SignupCredentials {
-  email: string;
-  password: string;
-  name: string;
-}
-
-export interface AuthResponse {
-  user: {
-    id: string;
-    email: string;
-    name: string;
-  };
-  accessToken: string;
-  refreshToken: string;
-}
-
-export interface AuthError {
-  message: string;
-  field?: string;
-}
-
-// API client
-// const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-// const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const API_URL = 'http://localhost:8000';
+// ============================================================================
+// API FUNCTIONS (Aligned with Backend)
+// ============================================================================
 
 async function loginRequest(credentials: LoginCredentials): Promise<AuthResponse> {
-  const response = await fetch(`${API_URL}/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include', // Important for cookies
-    body: JSON.stringify(credentials),
+  return apiClient.post<AuthResponse>('/auth/login', credentials, {
+    skipAuth: true,
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Login failed');
-  }
-
-  return response.json();
 }
 
-async function signupRequest(credentials: SignupCredentials): Promise<AuthResponse> {
-  const response = await fetch(`${API_URL}/auth/signup`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(credentials),
+async function signupRequest(credentials: SignupCredentials): Promise<MessageResponse> {
+  return apiClient.post<MessageResponse>('/auth/signup', credentials, {
+    skipAuth: true,
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Signup failed');
-  }
-
-  return response.json();
 }
 
-async function logoutRequest(): Promise<void> {
-  const response = await fetch(`${API_URL}/auth/logout`, {
-    method: 'POST',
-    credentials: 'include',
-  });
-
-  if (!response.ok) {
-    throw new Error('Logout failed');
-  }
+async function logoutRequest(): Promise<MessageResponse> {
+  return apiClient.post<MessageResponse>('/auth/logout');
 }
 
-// Hooks
+async function getCurrentUser(): Promise<UserInfo> {
+  return apiClient.get<UserInfo>('/api/me');
+}
+
+async function verifyEmailRequest(data: VerifyEmailRequest): Promise<MessageResponse> {
+  return apiClient.post<MessageResponse>('/auth/verify-email', data, {
+    skipAuth: true,
+  });
+}
+
+async function forgotPasswordRequest(data: ForgotPasswordRequest): Promise<MessageResponse> {
+  return apiClient.post<MessageResponse>('/auth/forgot-password', data, {
+    skipAuth: true,
+  });
+}
+
+async function resetPasswordRequest(data: ResetPasswordRequest): Promise<MessageResponse> {
+  return apiClient.post<MessageResponse>('/auth/reset-password', data, {
+    skipAuth: true,
+  });
+}
+
+// ============================================================================
+// HOOKS
+// ============================================================================
+
+/**
+ * useLogin - Login mutation hook
+ */
 export function useLogin() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -89,36 +72,37 @@ export function useLogin() {
   return useMutation({
     mutationFn: loginRequest,
     onSuccess: (data) => {
-      // Store tokens in localStorage (or use httpOnly cookies)
-      localStorage.setItem('accessToken', data.accessToken);
-      localStorage.setItem('refreshToken', data.refreshToken);
-      
+      // Store access token
+      apiClient.setAccessToken(data.accessToken);
+      // Note: refresh token is automatically stored in HTTP-only cookie by backend
+
       // Cache user data
       queryClient.setQueryData(['user'], data.user);
-      
+
       // Redirect to dashboard
       router.push('/dashboard');
     },
   });
 }
 
+/**
+ * useSignup - Signup mutation hook
+ */
 export function useSignup() {
   const router = useRouter();
-  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: signupRequest,
-    onSuccess: (data) => {
-      localStorage.setItem('accessToken', data.accessToken);
-      localStorage.setItem('refreshToken', data.refreshToken);
-      
-      queryClient.setQueryData(['user'], data.user);
-      
-      router.push('/dashboard');
+    onSuccess: () => {
+      // Redirect to login with success message
+      router.push('/login?registered=true');
     },
   });
 }
 
+/**
+ * useLogout - Logout mutation hook
+ */
 export function useLogout() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -126,15 +110,78 @@ export function useLogout() {
   return useMutation({
     mutationFn: logoutRequest,
     onSuccess: () => {
-      // Clear tokens
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      
-      // Clear cache
+      // Clear access token
+      apiClient.clearAuth();
+
+      // Clear all cached data
       queryClient.clear();
-      
+
       // Redirect to login
       router.push('/login');
     },
   });
+}
+
+/**
+ * useCurrentUser - Get current authenticated user
+ */
+export function useCurrentUser() {
+  return useQuery({
+    queryKey: ['user'],
+    queryFn: getCurrentUser,
+    retry: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: !!apiClient.getAccessToken(), // Only run if token exists
+  });
+}
+
+/**
+ * useVerifyEmail - Email verification hook
+ */
+export function useVerifyEmail() {
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: verifyEmailRequest,
+    onSuccess: () => {
+      router.push('/login?verified=true');
+    },
+  });
+}
+
+/**
+ * useForgotPassword - Password reset request hook
+ */
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: forgotPasswordRequest,
+  });
+}
+
+/**
+ * useResetPassword - Password reset hook
+ */
+export function useResetPassword() {
+  const router = useRouter();
+
+  return useMutation({
+    mutationFn: resetPasswordRequest,
+    onSuccess: () => {
+      router.push('/login?reset=true');
+    },
+  });
+}
+
+/**
+ * useAuth - Combined auth state hook
+ */
+export function useAuth() {
+  const { data: user, isLoading, error } = useCurrentUser();
+
+  return {
+    user,
+    isAuthenticated: !!user,
+    isLoading,
+    error,
+  };
 }

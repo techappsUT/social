@@ -65,6 +65,9 @@ func main() {
 	log.Println("Registering social platform adapters...")
 	registry := setupSocialAdapters(cfg)
 
+	// Setup Facebook webhooks
+	facebookWebhookHandler := setupFacebookWebhooks(cfg)
+
 	// Initialize rate limiter
 	limiter := social.NewRateLimiter()
 	log.Println("✓ Rate limiter initialized")
@@ -102,23 +105,40 @@ func main() {
 	})
 
 	// API Routes
-	r.Route("/api/social", func(r chi.Router) {
-		// OAuth routes
-		r.Get("/auth/{platform}/redirect", socialAuthHandler.InitiateOAuth)
-		r.Get("/auth/{platform}/callback", socialAuthHandler.OAuthCallback)
+	r.Route("/api", func(r chi.Router) {
+		// Social OAuth routes
+		r.Route("/social", func(r chi.Router) {
+			r.Get("/auth/{platform}/redirect", socialAuthHandler.InitiateOAuth)
+			r.Get("/auth/{platform}/callback", socialAuthHandler.OAuthCallback)
+			r.Post("/publish", socialAuthHandler.PublishContent)
 
-		// Posting routes
-		r.Post("/publish", socialAuthHandler.PublishContent)
+			// TODO: Add more routes
+			// r.Get("/accounts", socialAuthHandler.ListAccounts)
+			// r.Delete("/accounts/{id}", socialAuthHandler.DisconnectAccount)
+		})
 
-		// TODO: Add more routes
-		// r.Get("/accounts", socialAuthHandler.ListAccounts)
-		// r.Delete("/accounts/{id}", socialAuthHandler.DisconnectAccount)
+		// Webhook routes
+		r.Route("/webhooks", func(r chi.Router) {
+			// Facebook webhooks
+			if facebookWebhookHandler != nil {
+				facebookWebhookHTTPHandler := handlers.NewFacebookWebhookHandlerHTTP(facebookWebhookHandler)
+				r.Get("/facebook", facebookWebhookHTTPHandler.VerifyWebhook)
+				r.Post("/facebook", facebookWebhookHTTPHandler.HandleWebhook)
+			}
+
+			// TODO: Add webhooks for other platforms
+			// r.Post("/instagram", instagramWebhookHandler.HandleWebhook)
+			// r.Post("/twitter", twitterWebhookHandler.HandleWebhook)
+		})
 	})
 
 	// Start server
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("🚀 Server starting on http://%s", addr)
-	log.Printf("📝 API Documentation: http://%s/api/social/auth/{platform}/redirect", addr)
+	log.Printf("📝 OAuth flows available at: http://%s/api/social/auth/{platform}/redirect", addr)
+	if facebookWebhookHandler != nil {
+		log.Printf("🔔 Facebook webhooks listening at: http://%s/api/webhooks/facebook", addr)
+	}
 
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatalf("Server failed: %v", err)

@@ -34,8 +34,9 @@ type TwitterConfig struct {
 }
 
 type FacebookConfig struct {
-	AppID     string
-	AppSecret string
+	AppID              string
+	AppSecret          string
+	WebhookVerifyToken string
 }
 
 type LinkedInConfig struct {
@@ -67,8 +68,9 @@ func Load() *Config {
 			ClientSecret: getEnv("TWITTER_CLIENT_SECRET", ""),
 		},
 		Facebook: FacebookConfig{
-			AppID:     getEnv("FACEBOOK_APP_ID", ""),
-			AppSecret: getEnv("FACEBOOK_APP_SECRET", ""),
+			AppID:              getEnv("FACEBOOK_APP_ID", ""),
+			AppSecret:          getEnv("FACEBOOK_APP_SECRET", ""),
+			WebhookVerifyToken: getEnv("FACEBOOK_WEBHOOK_VERIFY_TOKEN", ""),
 		},
 		LinkedIn: LinkedInConfig{
 			ClientID:     getEnv("LINKEDIN_CLIENT_ID", ""),

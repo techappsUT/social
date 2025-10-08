@@ -6,7 +6,6 @@ import (
 
 	"github.com/techappsUT/social-queue/internal/config"
 	"github.com/techappsUT/social-queue/internal/social"
-
 	"github.com/techappsUT/social-queue/internal/social/adapters"
 )
 
@@ -75,6 +74,22 @@ func setupSocialAdapters(cfg *config.Config) *social.AdapterRegistry {
 	return registry
 }
 
+// setupFacebookWebhooks initializes Facebook webhook handlers
+func setupFacebookWebhooks(cfg *config.Config) *adapters.FacebookWebhookHandler {
+	if cfg.Facebook.AppSecret == "" || cfg.Facebook.WebhookVerifyToken == "" {
+		log.Println("⚠ Facebook webhook credentials not configured, skipping webhook handler")
+		return nil
+	}
+
+	handler := adapters.NewFacebookWebhookHandler(
+		cfg.Facebook.AppSecret,
+		cfg.Facebook.WebhookVerifyToken,
+	)
+
+	log.Println("✓ Facebook webhook handler initialized")
+	return handler
+}
+
 // validateSocialConfig checks if essential social platform configurations are present
 func validateSocialConfig(cfg *config.Config) error {
 	// At least one platform should be configured
@@ -91,7 +106,7 @@ func validateSocialConfig(cfg *config.Config) error {
 	}
 
 	if !hasAtLeastOne {
-		log.Println("⚠ WARNING: No social platform credentials configured. The application will start but social features will not work.")
+		log.Println("⚠ WARNING: No social platform credentials configured. The application will start but social features will be unavailable.")
 	}
 
 	return nil

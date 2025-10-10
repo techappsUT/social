@@ -7,11 +7,43 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const CountPostsByTeam = `-- name: CountPostsByTeam :one
+SELECT COUNT(*)
+FROM posts
+WHERE team_id = $1
+`
+
+func (q *Queries) CountPostsByTeam(ctx context.Context, teamID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, CountPostsByTeam, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const CountPostsByTeamAndDateRange = `-- name: CountPostsByTeamAndDateRange :one
+SELECT COUNT(*)
+FROM posts
+WHERE team_id = $1
+  AND published_at BETWEEN $2 AND $3
+`
+
+type CountPostsByTeamAndDateRangeParams struct {
+	TeamID        uuid.UUID          `db:"team_id" json:"team_id"`
+	PublishedAt   pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	PublishedAt_2 pgtype.Timestamptz `db:"published_at_2" json:"published_at_2"`
+}
+
+func (q *Queries) CountPostsByTeamAndDateRange(ctx context.Context, arg CountPostsByTeamAndDateRangeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, CountPostsByTeamAndDateRange, arg.TeamID, arg.PublishedAt, arg.PublishedAt_2)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const CreatePost = `-- name: CreatePost :one
 
@@ -26,20 +58,21 @@ INSERT INTO posts (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, impressions, engagements, clicks, likes, shares, comments, last_analytics_fetch_at, created_at, updated_at
+RETURNING id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, metrics, last_metrics_fetch_at, created_at, updated_at
 `
 
 type CreatePostParams struct {
-	ScheduledPostID uuid.UUID `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID          uuid.UUID `db:"team_id" json:"team_id"`
-	SocialAccountID uuid.UUID `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID  string    `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl *string   `db:"platform_post_url" json:"platform_post_url"`
-	Content         *string   `db:"content" json:"content"`
-	PublishedAt     time.Time `db:"published_at" json:"published_at"`
+	ScheduledPostID pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID          uuid.UUID          `db:"team_id" json:"team_id"`
+	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID  *string            `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl *string            `db:"platform_post_url" json:"platform_post_url"`
+	Content         string             `db:"content" json:"content"`
+	PublishedAt     pgtype.Timestamptz `db:"published_at" json:"published_at"`
 }
 
 // path: backend/sql/posts.sql
+// 🔄 REFACTORED - Schema has impressions in analytics_events, not posts table
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, error) {
 	row := q.db.QueryRow(ctx, CreatePost,
 		arg.ScheduledPostID,
@@ -60,13 +93,8 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		&i.PlatformPostUrl,
 		&i.Content,
 		&i.PublishedAt,
-		&i.Impressions,
-		&i.Engagements,
-		&i.Clicks,
-		&i.Likes,
-		&i.Shares,
-		&i.Comments,
-		&i.LastAnalyticsFetchAt,
+		&i.Metrics,
+		&i.LastMetricsFetchAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -74,7 +102,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 }
 
 const GetPostByID = `-- name: GetPostByID :one
-SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, impressions, engagements, clicks, likes, shares, comments, last_analytics_fetch_at, created_at, updated_at FROM posts WHERE id = $1
+SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, metrics, last_metrics_fetch_at, created_at, updated_at FROM posts WHERE id = $1
 `
 
 func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
@@ -89,13 +117,8 @@ func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
 		&i.PlatformPostUrl,
 		&i.Content,
 		&i.PublishedAt,
-		&i.Impressions,
-		&i.Engagements,
-		&i.Clicks,
-		&i.Likes,
-		&i.Shares,
-		&i.Comments,
-		&i.LastAnalyticsFetchAt,
+		&i.Metrics,
+		&i.LastMetricsFetchAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -103,13 +126,13 @@ func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
 }
 
 const GetPostByPlatformID = `-- name: GetPostByPlatformID :one
-SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, impressions, engagements, clicks, likes, shares, comments, last_analytics_fetch_at, created_at, updated_at FROM posts
+SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, metrics, last_metrics_fetch_at, created_at, updated_at FROM posts
 WHERE social_account_id = $1 AND platform_post_id = $2
 `
 
 type GetPostByPlatformIDParams struct {
 	SocialAccountID uuid.UUID `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID  string    `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostID  *string   `db:"platform_post_id" json:"platform_post_id"`
 }
 
 func (q *Queries) GetPostByPlatformID(ctx context.Context, arg GetPostByPlatformIDParams) (Post, error) {
@@ -124,13 +147,8 @@ func (q *Queries) GetPostByPlatformID(ctx context.Context, arg GetPostByPlatform
 		&i.PlatformPostUrl,
 		&i.Content,
 		&i.PublishedAt,
-		&i.Impressions,
-		&i.Engagements,
-		&i.Clicks,
-		&i.Likes,
-		&i.Shares,
-		&i.Comments,
-		&i.LastAnalyticsFetchAt,
+		&i.Metrics,
+		&i.LastMetricsFetchAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -138,10 +156,10 @@ func (q *Queries) GetPostByPlatformID(ctx context.Context, arg GetPostByPlatform
 }
 
 const GetPostByScheduledPostID = `-- name: GetPostByScheduledPostID :one
-SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, impressions, engagements, clicks, likes, shares, comments, last_analytics_fetch_at, created_at, updated_at FROM posts WHERE scheduled_post_id = $1
+SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, metrics, last_metrics_fetch_at, created_at, updated_at FROM posts WHERE scheduled_post_id = $1
 `
 
-func (q *Queries) GetPostByScheduledPostID(ctx context.Context, scheduledPostID uuid.UUID) (Post, error) {
+func (q *Queries) GetPostByScheduledPostID(ctx context.Context, scheduledPostID pgtype.UUID) (Post, error) {
 	row := q.db.QueryRow(ctx, GetPostByScheduledPostID, scheduledPostID)
 	var i Post
 	err := row.Scan(
@@ -153,93 +171,59 @@ func (q *Queries) GetPostByScheduledPostID(ctx context.Context, scheduledPostID 
 		&i.PlatformPostUrl,
 		&i.Content,
 		&i.PublishedAt,
-		&i.Impressions,
-		&i.Engagements,
-		&i.Clicks,
-		&i.Likes,
-		&i.Shares,
-		&i.Comments,
-		&i.LastAnalyticsFetchAt,
+		&i.Metrics,
+		&i.LastMetricsFetchAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const IncrementPostMetric = `-- name: IncrementPostMetric :exec
-UPDATE posts
-SET 
-    impressions = CASE WHEN $1 = 'impressions' THEN impressions + $2 ELSE impressions END,
-    engagements = CASE WHEN $1 = 'engagements' THEN engagements + $2 ELSE engagements END,
-    clicks = CASE WHEN $1 = 'clicks' THEN clicks + $2 ELSE clicks END,
-    likes = CASE WHEN $1 = 'likes' THEN likes + $2 ELSE likes END,
-    shares = CASE WHEN $1 = 'shares' THEN shares + $2 ELSE shares END,
-    comments = CASE WHEN $1 = 'comments' THEN comments + $2 ELSE comments END,
-    updated_at = NOW()
-WHERE id = $3
-`
-
-type IncrementPostMetricParams struct {
-	Metric interface{} `db:"metric" json:"metric"`
-	Value  *int64      `db:"value" json:"value"`
-	PostID uuid.UUID   `db:"post_id" json:"post_id"`
-}
-
-func (q *Queries) IncrementPostMetric(ctx context.Context, arg IncrementPostMetricParams) error {
-	_, err := q.db.Exec(ctx, IncrementPostMetric, arg.Metric, arg.Value, arg.PostID)
-	return err
-}
-
 const ListPostsByTeam = `-- name: ListPostsByTeam :many
 SELECT 
-    p.id, p.scheduled_post_id, p.team_id, p.social_account_id, p.platform_post_id, p.platform_post_url, p.content, p.published_at, p.impressions, p.engagements, p.clicks, p.likes, p.shares, p.comments, p.last_analytics_fetch_at, p.created_at, p.updated_at,
+    p.id, p.scheduled_post_id, p.team_id, p.social_account_id, p.platform_post_id, p.platform_post_url, p.content, p.published_at, p.metrics, p.last_metrics_fetch_at, p.created_at, p.updated_at,
     sa.platform,
     sa.username
 FROM posts p
 INNER JOIN social_accounts sa ON p.social_account_id = sa.id
 WHERE p.team_id = $1
-  AND p.published_at BETWEEN $4 AND $5
+  AND p.published_at BETWEEN $2 AND $3
 ORDER BY p.published_at DESC
-LIMIT $2 OFFSET $3
+LIMIT $4 OFFSET $5
 `
 
 type ListPostsByTeamParams struct {
-	TeamID    uuid.UUID `db:"team_id" json:"team_id"`
-	Limit     int32     `db:"limit" json:"limit"`
-	Offset    int32     `db:"offset" json:"offset"`
-	StartDate time.Time `db:"start_date" json:"start_date"`
-	EndDate   time.Time `db:"end_date" json:"end_date"`
+	TeamID        uuid.UUID          `db:"team_id" json:"team_id"`
+	PublishedAt   pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	PublishedAt_2 pgtype.Timestamptz `db:"published_at_2" json:"published_at_2"`
+	Limit         int32              `db:"limit" json:"limit"`
+	Offset        int32              `db:"offset" json:"offset"`
 }
 
 type ListPostsByTeamRow struct {
-	ID                   uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID      uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID      uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID       string             `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl      *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content              *string            `db:"content" json:"content"`
-	PublishedAt          time.Time          `db:"published_at" json:"published_at"`
-	Impressions          *int64             `db:"impressions" json:"impressions"`
-	Engagements          *int64             `db:"engagements" json:"engagements"`
-	Clicks               *int64             `db:"clicks" json:"clicks"`
-	Likes                *int64             `db:"likes" json:"likes"`
-	Shares               *int64             `db:"shares" json:"shares"`
-	Comments             *int64             `db:"comments" json:"comments"`
-	LastAnalyticsFetchAt pgtype.Timestamptz `db:"last_analytics_fetch_at" json:"last_analytics_fetch_at"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Platform             SocialPlatform     `db:"platform" json:"platform"`
-	Username             *string            `db:"username" json:"username"`
+	ID                 uuid.UUID          `db:"id" json:"id"`
+	ScheduledPostID    pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID             uuid.UUID          `db:"team_id" json:"team_id"`
+	SocialAccountID    uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID     *string            `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl    *string            `db:"platform_post_url" json:"platform_post_url"`
+	Content            string             `db:"content" json:"content"`
+	PublishedAt        pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	Metrics            []byte             `db:"metrics" json:"metrics"`
+	LastMetricsFetchAt pgtype.Timestamptz `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
+	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Platform           SocialPlatform     `db:"platform" json:"platform"`
+	Username           *string            `db:"username" json:"username"`
 }
 
 func (q *Queries) ListPostsByTeam(ctx context.Context, arg ListPostsByTeamParams) ([]ListPostsByTeamRow, error) {
 	rows, err := q.db.Query(ctx, ListPostsByTeam,
 		arg.TeamID,
+		arg.PublishedAt,
+		arg.PublishedAt_2,
 		arg.Limit,
 		arg.Offset,
-		arg.StartDate,
-		arg.EndDate,
 	)
 	if err != nil {
 		return nil, err
@@ -257,13 +241,8 @@ func (q *Queries) ListPostsByTeam(ctx context.Context, arg ListPostsByTeamParams
 			&i.PlatformPostUrl,
 			&i.Content,
 			&i.PublishedAt,
-			&i.Impressions,
-			&i.Engagements,
-			&i.Clicks,
-			&i.Likes,
-			&i.Shares,
-			&i.Comments,
-			&i.LastAnalyticsFetchAt,
+			&i.Metrics,
+			&i.LastMetricsFetchAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Platform,
@@ -279,39 +258,71 @@ func (q *Queries) ListPostsByTeam(ctx context.Context, arg ListPostsByTeamParams
 	return items, nil
 }
 
-const UpdatePostAnalytics = `-- name: UpdatePostAnalytics :exec
-UPDATE posts
-SET 
-    impressions = $2,
-    engagements = $3,
-    clicks = $4,
-    likes = $5,
-    shares = $6,
-    comments = $7,
-    last_analytics_fetch_at = NOW(),
-    updated_at = NOW()
-WHERE id = $1
+const ListRecentPostsByTeam = `-- name: ListRecentPostsByTeam :many
+SELECT 
+    p.id, p.scheduled_post_id, p.team_id, p.social_account_id, p.platform_post_id, p.platform_post_url, p.content, p.published_at, p.metrics, p.last_metrics_fetch_at, p.created_at, p.updated_at,
+    sa.platform,
+    sa.username
+FROM posts p
+INNER JOIN social_accounts sa ON p.social_account_id = sa.id
+WHERE p.team_id = $1
+ORDER BY p.published_at DESC
+LIMIT $2
 `
 
-type UpdatePostAnalyticsParams struct {
-	ID          uuid.UUID `db:"id" json:"id"`
-	Impressions *int64    `db:"impressions" json:"impressions"`
-	Engagements *int64    `db:"engagements" json:"engagements"`
-	Clicks      *int64    `db:"clicks" json:"clicks"`
-	Likes       *int64    `db:"likes" json:"likes"`
-	Shares      *int64    `db:"shares" json:"shares"`
-	Comments    *int64    `db:"comments" json:"comments"`
+type ListRecentPostsByTeamParams struct {
+	TeamID uuid.UUID `db:"team_id" json:"team_id"`
+	Limit  int32     `db:"limit" json:"limit"`
 }
 
-func (q *Queries) UpdatePostAnalytics(ctx context.Context, arg UpdatePostAnalyticsParams) error {
-	_, err := q.db.Exec(ctx, UpdatePostAnalytics,
-		arg.ID,
-		arg.Impressions,
-		arg.Engagements,
-		arg.Clicks,
-		arg.Likes,
-		arg.Shares,
-		arg.Comments,
-	)
-	return err
+type ListRecentPostsByTeamRow struct {
+	ID                 uuid.UUID          `db:"id" json:"id"`
+	ScheduledPostID    pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID             uuid.UUID          `db:"team_id" json:"team_id"`
+	SocialAccountID    uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID     *string            `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl    *string            `db:"platform_post_url" json:"platform_post_url"`
+	Content            string             `db:"content" json:"content"`
+	PublishedAt        pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	Metrics            []byte             `db:"metrics" json:"metrics"`
+	LastMetricsFetchAt pgtype.Timestamptz `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
+	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Platform           SocialPlatform     `db:"platform" json:"platform"`
+	Username           *string            `db:"username" json:"username"`
+}
+
+func (q *Queries) ListRecentPostsByTeam(ctx context.Context, arg ListRecentPostsByTeamParams) ([]ListRecentPostsByTeamRow, error) {
+	rows, err := q.db.Query(ctx, ListRecentPostsByTeam, arg.TeamID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentPostsByTeamRow{}
+	for rows.Next() {
+		var i ListRecentPostsByTeamRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScheduledPostID,
+			&i.TeamID,
+			&i.SocialAccountID,
+			&i.PlatformPostID,
+			&i.PlatformPostUrl,
+			&i.Content,
+			&i.PublishedAt,
+			&i.Metrics,
+			&i.LastMetricsFetchAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Platform,
+			&i.Username,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

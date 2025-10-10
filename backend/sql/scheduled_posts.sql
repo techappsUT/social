@@ -1,4 +1,5 @@
 -- path: backend/sql/scheduled_posts.sql
+-- ✅ KEEP - Verify this file exists with these queries
 
 -- name: CreateScheduledPost :one
 INSERT INTO scheduled_posts (
@@ -7,11 +8,12 @@ INSERT INTO scheduled_posts (
     social_account_id,
     content,
     content_html,
+    shortened_links,
     status,
     scheduled_at,
     platform_specific_options
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 RETURNING *;
 
@@ -19,31 +21,11 @@ RETURNING *;
 SELECT * FROM scheduled_posts
 WHERE id = $1 AND deleted_at IS NULL;
 
--- name: GetScheduledPostWithAccount :one
-SELECT 
-    sp.*,
-    sa.platform,
-    sa.username,
-    sa.display_name
-FROM scheduled_posts sp
-INNER JOIN social_accounts sa ON sp.social_account_id = sa.id
-WHERE sp.id = $1 AND sp.deleted_at IS NULL;
-
 -- name: ListScheduledPostsByTeam :many
-SELECT 
-    sp.*,
-    sa.platform,
-    sa.username,
-    u.full_name as creator_name
-FROM scheduled_posts sp
-INNER JOIN social_accounts sa ON sp.social_account_id = sa.id
-INNER JOIN users u ON sp.created_by = u.id
-WHERE sp.team_id = $1 
-  AND sp.deleted_at IS NULL
-ORDER BY 
-    CASE WHEN sp.scheduled_at IS NULL THEN 1 ELSE 0 END,
-    sp.scheduled_at ASC,
-    sp.created_at DESC
+SELECT * FROM scheduled_posts
+WHERE team_id = $1 
+  AND deleted_at IS NULL
+ORDER BY scheduled_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: GetDuePosts :many
@@ -62,23 +44,9 @@ LIMIT $2;
 UPDATE scheduled_posts
 SET 
     status = $2,
-    updated_at = NOW()
-WHERE id = $1;
-
--- name: MarkPostPublished :exec
-UPDATE scheduled_posts
-SET 
-    status = 'published',
-    published_at = $2,
-    updated_at = NOW()
-WHERE id = $1;
-
--- name: MarkPostFailed :exec
-UPDATE scheduled_posts
-SET 
-    status = 'failed',
-    error_message = $2,
-    retry_count = retry_count + 1,
+    error_message = COALESCE(sqlc.narg('error_message'), error_message),
+    retry_count = COALESCE(sqlc.narg('retry_count'), retry_count),
+    published_at = COALESCE(sqlc.narg('published_at'), published_at),
     updated_at = NOW()
 WHERE id = $1;
 
@@ -101,7 +69,15 @@ SET
 WHERE id = $1;
 
 -- name: CountScheduledPostsByTeam :one
-SELECT COUNT(*) FROM scheduled_posts
+SELECT COUNT(*)
+FROM scheduled_posts
 WHERE team_id = $1 
-  AND status IN ('draft', 'scheduled', 'queued')
   AND deleted_at IS NULL;
+
+-- name: IncrementRetryCount :exec
+UPDATE scheduled_posts
+SET 
+    retry_count = retry_count + 1,
+    error_message = $2,
+    updated_at = NOW()
+WHERE id = $1;

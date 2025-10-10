@@ -9,14 +9,92 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const GetPlanByID = `-- name: GetPlanByID :one
+const CreatePlan = `-- name: CreatePlan :one
 
-SELECT id, name, slug, description, price_cents, currency, interval, features, stripe_price_id, stripe_product_id, is_active, is_popular, display_order, created_at, updated_at FROM plans WHERE id = $1 AND is_active = true
+INSERT INTO plans (
+    name,
+    slug,
+    description,
+    price_monthly,
+    price_yearly,
+    features,
+    limits,
+    is_active,
+    stripe_price_id_monthly,
+    stripe_price_id_yearly
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+RETURNING id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at
 `
 
+type CreatePlanParams struct {
+	Name                 string         `db:"name" json:"name"`
+	Slug                 string         `db:"slug" json:"slug"`
+	Description          *string        `db:"description" json:"description"`
+	PriceMonthly         pgtype.Numeric `db:"price_monthly" json:"price_monthly"`
+	PriceYearly          pgtype.Numeric `db:"price_yearly" json:"price_yearly"`
+	Features             []byte         `db:"features" json:"features"`
+	Limits               []byte         `db:"limits" json:"limits"`
+	IsActive             *bool          `db:"is_active" json:"is_active"`
+	StripePriceIDMonthly *string        `db:"stripe_price_id_monthly" json:"stripe_price_id_monthly"`
+	StripePriceIDYearly  *string        `db:"stripe_price_id_yearly" json:"stripe_price_id_yearly"`
+}
+
 // path: backend/sql/plans.sql
+// 🔄 REFACTORED - Use price_monthly/yearly, stripe_price_id_monthly/yearly
+func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, error) {
+	row := q.db.QueryRow(ctx, CreatePlan,
+		arg.Name,
+		arg.Slug,
+		arg.Description,
+		arg.PriceMonthly,
+		arg.PriceYearly,
+		arg.Features,
+		arg.Limits,
+		arg.IsActive,
+		arg.StripePriceIDMonthly,
+		arg.StripePriceIDYearly,
+	)
+	var i Plan
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceMonthly,
+		&i.PriceYearly,
+		&i.Features,
+		&i.Limits,
+		&i.IsActive,
+		&i.StripePriceIDMonthly,
+		&i.StripePriceIDYearly,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const DeactivatePlan = `-- name: DeactivatePlan :exec
+UPDATE plans
+SET 
+    is_active = FALSE,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) DeactivatePlan(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, DeactivatePlan, id)
+	return err
+}
+
+const GetPlanByID = `-- name: GetPlanByID :one
+SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans WHERE id = $1
+`
+
 func (q *Queries) GetPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 	row := q.db.QueryRow(ctx, GetPlanByID, id)
 	var i Plan
@@ -25,15 +103,13 @@ func (q *Queries) GetPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 		&i.Name,
 		&i.Slug,
 		&i.Description,
-		&i.PriceCents,
-		&i.Currency,
-		&i.Interval,
+		&i.PriceMonthly,
+		&i.PriceYearly,
 		&i.Features,
-		&i.StripePriceID,
-		&i.StripeProductID,
+		&i.Limits,
 		&i.IsActive,
-		&i.IsPopular,
-		&i.DisplayOrder,
+		&i.StripePriceIDMonthly,
+		&i.StripePriceIDYearly,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -41,7 +117,7 @@ func (q *Queries) GetPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 }
 
 const GetPlanBySlug = `-- name: GetPlanBySlug :one
-SELECT id, name, slug, description, price_cents, currency, interval, features, stripe_price_id, stripe_product_id, is_active, is_popular, display_order, created_at, updated_at FROM plans WHERE slug = $1 AND is_active = true
+SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans WHERE slug = $1
 `
 
 func (q *Queries) GetPlanBySlug(ctx context.Context, slug string) (Plan, error) {
@@ -52,15 +128,63 @@ func (q *Queries) GetPlanBySlug(ctx context.Context, slug string) (Plan, error) 
 		&i.Name,
 		&i.Slug,
 		&i.Description,
-		&i.PriceCents,
-		&i.Currency,
-		&i.Interval,
+		&i.PriceMonthly,
+		&i.PriceYearly,
 		&i.Features,
-		&i.StripePriceID,
-		&i.StripeProductID,
+		&i.Limits,
 		&i.IsActive,
-		&i.IsPopular,
-		&i.DisplayOrder,
+		&i.StripePriceIDMonthly,
+		&i.StripePriceIDYearly,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const GetPlanByStripeMonthlyID = `-- name: GetPlanByStripeMonthlyID :one
+SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans WHERE stripe_price_id_monthly = $1
+`
+
+func (q *Queries) GetPlanByStripeMonthlyID(ctx context.Context, stripePriceIDMonthly *string) (Plan, error) {
+	row := q.db.QueryRow(ctx, GetPlanByStripeMonthlyID, stripePriceIDMonthly)
+	var i Plan
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceMonthly,
+		&i.PriceYearly,
+		&i.Features,
+		&i.Limits,
+		&i.IsActive,
+		&i.StripePriceIDMonthly,
+		&i.StripePriceIDYearly,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const GetPlanByStripeYearlyID = `-- name: GetPlanByStripeYearlyID :one
+SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans WHERE stripe_price_id_yearly = $1
+`
+
+func (q *Queries) GetPlanByStripeYearlyID(ctx context.Context, stripePriceIDYearly *string) (Plan, error) {
+	row := q.db.QueryRow(ctx, GetPlanByStripeYearlyID, stripePriceIDYearly)
+	var i Plan
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceMonthly,
+		&i.PriceYearly,
+		&i.Features,
+		&i.Limits,
+		&i.IsActive,
+		&i.StripePriceIDMonthly,
+		&i.StripePriceIDYearly,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -68,9 +192,9 @@ func (q *Queries) GetPlanBySlug(ctx context.Context, slug string) (Plan, error) 
 }
 
 const ListActivePlans = `-- name: ListActivePlans :many
-SELECT id, name, slug, description, price_cents, currency, interval, features, stripe_price_id, stripe_product_id, is_active, is_popular, display_order, created_at, updated_at FROM plans 
-WHERE is_active = true 
-ORDER BY display_order ASC, price_cents ASC
+SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans
+WHERE is_active = TRUE
+ORDER BY price_monthly ASC
 `
 
 func (q *Queries) ListActivePlans(ctx context.Context) ([]Plan, error) {
@@ -87,15 +211,13 @@ func (q *Queries) ListActivePlans(ctx context.Context) ([]Plan, error) {
 			&i.Name,
 			&i.Slug,
 			&i.Description,
-			&i.PriceCents,
-			&i.Currency,
-			&i.Interval,
+			&i.PriceMonthly,
+			&i.PriceYearly,
 			&i.Features,
-			&i.StripePriceID,
-			&i.StripeProductID,
+			&i.Limits,
 			&i.IsActive,
-			&i.IsPopular,
-			&i.DisplayOrder,
+			&i.StripePriceIDMonthly,
+			&i.StripePriceIDYearly,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -107,4 +229,102 @@ func (q *Queries) ListActivePlans(ctx context.Context) ([]Plan, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const ListAllPlans = `-- name: ListAllPlans :many
+SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans
+ORDER BY price_monthly ASC
+`
+
+func (q *Queries) ListAllPlans(ctx context.Context) ([]Plan, error) {
+	rows, err := q.db.Query(ctx, ListAllPlans)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Plan{}
+	for rows.Next() {
+		var i Plan
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Description,
+			&i.PriceMonthly,
+			&i.PriceYearly,
+			&i.Features,
+			&i.Limits,
+			&i.IsActive,
+			&i.StripePriceIDMonthly,
+			&i.StripePriceIDYearly,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const UpdatePlan = `-- name: UpdatePlan :one
+UPDATE plans
+SET 
+    name = COALESCE($1, name),
+    slug = COALESCE($2, slug),
+    description = COALESCE($3, description),
+    price_monthly = COALESCE($4, price_monthly),
+    price_yearly = COALESCE($5, price_yearly),
+    features = COALESCE($6, features),
+    limits = COALESCE($7, limits),
+    is_active = COALESCE($8, is_active),
+    updated_at = NOW()
+WHERE id = $9
+RETURNING id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at
+`
+
+type UpdatePlanParams struct {
+	Name         *string        `db:"name" json:"name"`
+	Slug         *string        `db:"slug" json:"slug"`
+	Description  *string        `db:"description" json:"description"`
+	PriceMonthly pgtype.Numeric `db:"price_monthly" json:"price_monthly"`
+	PriceYearly  pgtype.Numeric `db:"price_yearly" json:"price_yearly"`
+	Features     []byte         `db:"features" json:"features"`
+	Limits       []byte         `db:"limits" json:"limits"`
+	IsActive     *bool          `db:"is_active" json:"is_active"`
+	ID           uuid.UUID      `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (Plan, error) {
+	row := q.db.QueryRow(ctx, UpdatePlan,
+		arg.Name,
+		arg.Slug,
+		arg.Description,
+		arg.PriceMonthly,
+		arg.PriceYearly,
+		arg.Features,
+		arg.Limits,
+		arg.IsActive,
+		arg.ID,
+	)
+	var i Plan
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceMonthly,
+		&i.PriceYearly,
+		&i.Features,
+		&i.Limits,
+		&i.IsActive,
+		&i.StripePriceIDMonthly,
+		&i.StripePriceIDYearly,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

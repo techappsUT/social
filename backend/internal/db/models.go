@@ -17,11 +17,10 @@ import (
 type AttachmentType string
 
 const (
-	AttachmentTypeImage       AttachmentType = "image"
-	AttachmentTypeVideo       AttachmentType = "video"
-	AttachmentTypeGif         AttachmentType = "gif"
-	AttachmentTypeDocument    AttachmentType = "document"
-	AttachmentTypeLinkPreview AttachmentType = "link_preview"
+	AttachmentTypeImage    AttachmentType = "image"
+	AttachmentTypeVideo    AttachmentType = "video"
+	AttachmentTypeGif      AttachmentType = "gif"
+	AttachmentTypeDocument AttachmentType = "document"
 )
 
 func (e *AttachmentType) Scan(src interface{}) error {
@@ -64,8 +63,7 @@ func (e AttachmentType) Valid() bool {
 	case AttachmentTypeImage,
 		AttachmentTypeVideo,
 		AttachmentTypeGif,
-		AttachmentTypeDocument,
-		AttachmentTypeLinkPreview:
+		AttachmentTypeDocument:
 		return true
 	}
 	return false
@@ -77,7 +75,6 @@ func AllAttachmentTypeValues() []AttachmentType {
 		AttachmentTypeVideo,
 		AttachmentTypeGif,
 		AttachmentTypeDocument,
-		AttachmentTypeLinkPreview,
 	}
 }
 
@@ -89,8 +86,10 @@ const (
 	EventTypeLike       EventType = "like"
 	EventTypeShare      EventType = "share"
 	EventTypeComment    EventType = "comment"
-	EventTypeFollow     EventType = "follow"
-	EventTypeEngagement EventType = "engagement"
+	EventTypeRetweet    EventType = "retweet"
+	EventTypeReply      EventType = "reply"
+	EventTypeView       EventType = "view"
+	EventTypeSave       EventType = "save"
 )
 
 func (e *EventType) Scan(src interface{}) error {
@@ -135,8 +134,10 @@ func (e EventType) Valid() bool {
 		EventTypeLike,
 		EventTypeShare,
 		EventTypeComment,
-		EventTypeFollow,
-		EventTypeEngagement:
+		EventTypeRetweet,
+		EventTypeReply,
+		EventTypeView,
+		EventTypeSave:
 		return true
 	}
 	return false
@@ -149,8 +150,10 @@ func AllEventTypeValues() []EventType {
 		EventTypeLike,
 		EventTypeShare,
 		EventTypeComment,
-		EventTypeFollow,
-		EventTypeEngagement,
+		EventTypeRetweet,
+		EventTypeReply,
+		EventTypeView,
+		EventTypeSave,
 	}
 }
 
@@ -228,7 +231,6 @@ const (
 	JobStatusRunning   JobStatus = "running"
 	JobStatusCompleted JobStatus = "completed"
 	JobStatusFailed    JobStatus = "failed"
-	JobStatusCanceled  JobStatus = "canceled"
 )
 
 func (e *JobStatus) Scan(src interface{}) error {
@@ -271,8 +273,7 @@ func (e JobStatus) Valid() bool {
 	case JobStatusPending,
 		JobStatusRunning,
 		JobStatusCompleted,
-		JobStatusFailed,
-		JobStatusCanceled:
+		JobStatusFailed:
 		return true
 	}
 	return false
@@ -284,7 +285,6 @@ func AllJobStatusValues() []JobStatus {
 		JobStatusRunning,
 		JobStatusCompleted,
 		JobStatusFailed,
-		JobStatusCanceled,
 	}
 }
 
@@ -426,7 +426,6 @@ const (
 	QueueStatusProcessing QueueStatus = "processing"
 	QueueStatusCompleted  QueueStatus = "completed"
 	QueueStatusFailed     QueueStatus = "failed"
-	QueueStatusRetrying   QueueStatus = "retrying"
 )
 
 func (e *QueueStatus) Scan(src interface{}) error {
@@ -469,8 +468,7 @@ func (e QueueStatus) Valid() bool {
 	case QueueStatusPending,
 		QueueStatusProcessing,
 		QueueStatusCompleted,
-		QueueStatusFailed,
-		QueueStatusRetrying:
+		QueueStatusFailed:
 		return true
 	}
 	return false
@@ -482,7 +480,6 @@ func AllQueueStatusValues() []QueueStatus {
 		QueueStatusProcessing,
 		QueueStatusCompleted,
 		QueueStatusFailed,
-		QueueStatusRetrying,
 	}
 }
 
@@ -629,13 +626,11 @@ func AllSocialPlatformValues() []SocialPlatform {
 type SubscriptionStatus string
 
 const (
-	SubscriptionStatusTrialing          SubscriptionStatus = "trialing"
-	SubscriptionStatusActive            SubscriptionStatus = "active"
-	SubscriptionStatusPastDue           SubscriptionStatus = "past_due"
-	SubscriptionStatusCanceled          SubscriptionStatus = "canceled"
-	SubscriptionStatusIncomplete        SubscriptionStatus = "incomplete"
-	SubscriptionStatusIncompleteExpired SubscriptionStatus = "incomplete_expired"
-	SubscriptionStatusPaused            SubscriptionStatus = "paused"
+	SubscriptionStatusActive   SubscriptionStatus = "active"
+	SubscriptionStatusTrialing SubscriptionStatus = "trialing"
+	SubscriptionStatusPastDue  SubscriptionStatus = "past_due"
+	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
+	SubscriptionStatusUnpaid   SubscriptionStatus = "unpaid"
 )
 
 func (e *SubscriptionStatus) Scan(src interface{}) error {
@@ -675,13 +670,11 @@ func (ns NullSubscriptionStatus) Value() (driver.Value, error) {
 
 func (e SubscriptionStatus) Valid() bool {
 	switch e {
-	case SubscriptionStatusTrialing,
-		SubscriptionStatusActive,
+	case SubscriptionStatusActive,
+		SubscriptionStatusTrialing,
 		SubscriptionStatusPastDue,
 		SubscriptionStatusCanceled,
-		SubscriptionStatusIncomplete,
-		SubscriptionStatusIncompleteExpired,
-		SubscriptionStatusPaused:
+		SubscriptionStatusUnpaid:
 		return true
 	}
 	return false
@@ -689,25 +682,20 @@ func (e SubscriptionStatus) Valid() bool {
 
 func AllSubscriptionStatusValues() []SubscriptionStatus {
 	return []SubscriptionStatus{
-		SubscriptionStatusTrialing,
 		SubscriptionStatusActive,
+		SubscriptionStatusTrialing,
 		SubscriptionStatusPastDue,
 		SubscriptionStatusCanceled,
-		SubscriptionStatusIncomplete,
-		SubscriptionStatusIncompleteExpired,
-		SubscriptionStatusPaused,
+		SubscriptionStatusUnpaid,
 	}
 }
 
 type WebhookSource string
 
 const (
-	WebhookSourceStripe    WebhookSource = "stripe"
-	WebhookSourceTwitter   WebhookSource = "twitter"
-	WebhookSourceFacebook  WebhookSource = "facebook"
-	WebhookSourceInstagram WebhookSource = "instagram"
-	WebhookSourceLinkedin  WebhookSource = "linkedin"
-	WebhookSourceInternal  WebhookSource = "internal"
+	WebhookSourceStripe         WebhookSource = "stripe"
+	WebhookSourceSocialPlatform WebhookSource = "social_platform"
+	WebhookSourceInternal       WebhookSource = "internal"
 )
 
 func (e *WebhookSource) Scan(src interface{}) error {
@@ -748,10 +736,7 @@ func (ns NullWebhookSource) Value() (driver.Value, error) {
 func (e WebhookSource) Valid() bool {
 	switch e {
 	case WebhookSourceStripe,
-		WebhookSourceTwitter,
-		WebhookSourceFacebook,
-		WebhookSourceInstagram,
-		WebhookSourceLinkedin,
+		WebhookSourceSocialPlatform,
 		WebhookSourceInternal:
 		return true
 	}
@@ -761,110 +746,86 @@ func (e WebhookSource) Valid() bool {
 func AllWebhookSourceValues() []WebhookSource {
 	return []WebhookSource{
 		WebhookSourceStripe,
-		WebhookSourceTwitter,
-		WebhookSourceFacebook,
-		WebhookSourceInstagram,
-		WebhookSourceLinkedin,
+		WebhookSourceSocialPlatform,
 		WebhookSourceInternal,
 	}
 }
 
+// Social media engagement events
 type AnalyticsEvent struct {
-	ID             uuid.UUID          `db:"id" json:"id"`
-	PostID         uuid.UUID          `db:"post_id" json:"post_id"`
-	TeamID         uuid.UUID          `db:"team_id" json:"team_id"`
-	EventType      EventType          `db:"event_type" json:"event_type"`
-	EventValue     *int32             `db:"event_value" json:"event_value"`
-	Platform       SocialPlatform     `db:"platform" json:"platform"`
-	Country        *string            `db:"country" json:"country"`
-	DeviceType     *string            `db:"device_type" json:"device_type"`
-	Referrer       *string            `db:"referrer" json:"referrer"`
-	EventMetadata  []byte             `db:"event_metadata" json:"event_metadata"`
-	EventTimestamp time.Time          `db:"event_timestamp" json:"event_timestamp"`
-	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID            uuid.UUID          `db:"id" json:"id"`
+	PostID        uuid.UUID          `db:"post_id" json:"post_id"`
+	EventType     EventType          `db:"event_type" json:"event_type"`
+	EventValue    *int32             `db:"event_value" json:"event_value"`
+	EventMetadata []byte             `db:"event_metadata" json:"event_metadata"`
+	RecordedAt    pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
 }
 
+// Billing invoices
 type Invoice struct {
 	ID               uuid.UUID          `db:"id" json:"id"`
 	SubscriptionID   uuid.UUID          `db:"subscription_id" json:"subscription_id"`
-	TeamID           uuid.UUID          `db:"team_id" json:"team_id"`
-	StripeInvoiceID  *string            `db:"stripe_invoice_id" json:"stripe_invoice_id"`
-	InvoiceNumber    *string            `db:"invoice_number" json:"invoice_number"`
-	Status           NullInvoiceStatus  `db:"status" json:"status"`
-	Subtotal         int64              `db:"subtotal" json:"subtotal"`
-	Tax              *int64             `db:"tax" json:"tax"`
-	Total            int64              `db:"total" json:"total"`
-	AmountPaid       *int64             `db:"amount_paid" json:"amount_paid"`
-	AmountDue        int64              `db:"amount_due" json:"amount_due"`
+	StripeInvoiceID  string             `db:"stripe_invoice_id" json:"stripe_invoice_id"`
+	AmountDue        pgtype.Numeric     `db:"amount_due" json:"amount_due"`
+	AmountPaid       pgtype.Numeric     `db:"amount_paid" json:"amount_paid"`
 	Currency         *string            `db:"currency" json:"currency"`
-	InvoiceDate      pgtype.Timestamptz `db:"invoice_date" json:"invoice_date"`
+	Status           NullInvoiceStatus  `db:"status" json:"status"`
+	InvoicePdf       *string            `db:"invoice_pdf" json:"invoice_pdf"`
+	HostedInvoiceUrl *string            `db:"hosted_invoice_url" json:"hosted_invoice_url"`
 	DueDate          pgtype.Timestamptz `db:"due_date" json:"due_date"`
 	PaidAt           pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
-	InvoicePdfUrl    *string            `db:"invoice_pdf_url" json:"invoice_pdf_url"`
-	HostedInvoiceUrl *string            `db:"hosted_invoice_url" json:"hosted_invoice_url"`
-	Metadata         []byte             `db:"metadata" json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// Background job execution log
 type JobRun struct {
-	ID            uuid.UUID          `db:"id" json:"id"`
-	JobName       string             `db:"job_name" json:"job_name"`
-	JobType       string             `db:"job_type" json:"job_type"`
-	Status        NullJobStatus      `db:"status" json:"status"`
-	StartedAt     pgtype.Timestamptz `db:"started_at" json:"started_at"`
-	CompletedAt   pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
-	DurationMs    *int64             `db:"duration_ms" json:"duration_ms"`
-	WorkerID      *string            `db:"worker_id" json:"worker_id"`
-	Context       []byte             `db:"context" json:"context"`
-	Result        []byte             `db:"result" json:"result"`
-	ErrorMessage  *string            `db:"error_message" json:"error_message"`
-	StackTrace    *string            `db:"stack_trace" json:"stack_trace"`
-	AttemptNumber *int32             `db:"attempt_number" json:"attempt_number"`
-	MaxAttempts   *int32             `db:"max_attempts" json:"max_attempts"`
-	NextRetryAt   pgtype.Timestamptz `db:"next_retry_at" json:"next_retry_at"`
-	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID          uuid.UUID          `db:"id" json:"id"`
+	JobName     string             `db:"job_name" json:"job_name"`
+	Status      NullJobStatus      `db:"status" json:"status"`
+	Payload     []byte             `db:"payload" json:"payload"`
+	Result      []byte             `db:"result" json:"result"`
+	Error       *string            `db:"error" json:"error"`
+	StartedAt   pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	CompletedAt pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// Subscription plans
 type Plan struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	Name            string             `db:"name" json:"name"`
-	Slug            string             `db:"slug" json:"slug"`
-	Description     *string            `db:"description" json:"description"`
-	PriceCents      int32              `db:"price_cents" json:"price_cents"`
-	Currency        *string            `db:"currency" json:"currency"`
-	Interval        PlanInterval       `db:"interval" json:"interval"`
-	Features        []byte             `db:"features" json:"features"`
-	StripePriceID   *string            `db:"stripe_price_id" json:"stripe_price_id"`
-	StripeProductID *string            `db:"stripe_product_id" json:"stripe_product_id"`
-	IsActive        *bool              `db:"is_active" json:"is_active"`
-	IsPopular       *bool              `db:"is_popular" json:"is_popular"`
-	DisplayOrder    *int32             `db:"display_order" json:"display_order"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-}
-
-type Post struct {
 	ID                   uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID      uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID      uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID       string             `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl      *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content              *string            `db:"content" json:"content"`
-	PublishedAt          time.Time          `db:"published_at" json:"published_at"`
-	Impressions          *int64             `db:"impressions" json:"impressions"`
-	Engagements          *int64             `db:"engagements" json:"engagements"`
-	Clicks               *int64             `db:"clicks" json:"clicks"`
-	Likes                *int64             `db:"likes" json:"likes"`
-	Shares               *int64             `db:"shares" json:"shares"`
-	Comments             *int64             `db:"comments" json:"comments"`
-	LastAnalyticsFetchAt pgtype.Timestamptz `db:"last_analytics_fetch_at" json:"last_analytics_fetch_at"`
+	Name                 string             `db:"name" json:"name"`
+	Slug                 string             `db:"slug" json:"slug"`
+	Description          *string            `db:"description" json:"description"`
+	PriceMonthly         pgtype.Numeric     `db:"price_monthly" json:"price_monthly"`
+	PriceYearly          pgtype.Numeric     `db:"price_yearly" json:"price_yearly"`
+	Features             []byte             `db:"features" json:"features"`
+	Limits               []byte             `db:"limits" json:"limits"`
+	IsActive             *bool              `db:"is_active" json:"is_active"`
+	StripePriceIDMonthly *string            `db:"stripe_price_id_monthly" json:"stripe_price_id_monthly"`
+	StripePriceIDYearly  *string            `db:"stripe_price_id_yearly" json:"stripe_price_id_yearly"`
 	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// Archive of published posts
+type Post struct {
+	ID                 uuid.UUID          `db:"id" json:"id"`
+	ScheduledPostID    pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID             uuid.UUID          `db:"team_id" json:"team_id"`
+	SocialAccountID    uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID     *string            `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl    *string            `db:"platform_post_url" json:"platform_post_url"`
+	Content            string             `db:"content" json:"content"`
+	PublishedAt        pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	Metrics            []byte             `db:"metrics" json:"metrics"`
+	LastMetricsFetchAt pgtype.Timestamptz `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
+	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+// Media attachments for posts
 type PostAttachment struct {
 	ID              uuid.UUID          `db:"id" json:"id"`
 	ScheduledPostID uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
@@ -877,28 +838,37 @@ type PostAttachment struct {
 	Height          *int32             `db:"height" json:"height"`
 	Duration        *int32             `db:"duration" json:"duration"`
 	AltText         *string            `db:"alt_text" json:"alt_text"`
-	DisplayOrder    *int32             `db:"display_order" json:"display_order"`
-	UploadMetadata  []byte             `db:"upload_metadata" json:"upload_metadata"`
+	UploadOrder     *int32             `db:"upload_order" json:"upload_order"`
 	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
+// Background job queue for post publishing
 type PostQueue struct {
 	ID              uuid.UUID          `db:"id" json:"id"`
 	ScheduledPostID uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
 	Status          NullQueueStatus    `db:"status" json:"status"`
 	Priority        *int32             `db:"priority" json:"priority"`
-	ScheduledFor    time.Time          `db:"scheduled_for" json:"scheduled_for"`
-	AttemptCount    *int32             `db:"attempt_count" json:"attempt_count"`
+	Attempts        *int32             `db:"attempts" json:"attempts"`
 	MaxAttempts     *int32             `db:"max_attempts" json:"max_attempts"`
-	LastError       *string            `db:"last_error" json:"last_error"`
-	WorkerID        *string            `db:"worker_id" json:"worker_id"`
-	LockedAt        pgtype.Timestamptz `db:"locked_at" json:"locked_at"`
-	LockExpiresAt   pgtype.Timestamptz `db:"lock_expires_at" json:"lock_expires_at"`
+	Error           *string            `db:"error" json:"error"`
+	ScheduledFor    time.Time          `db:"scheduled_for" json:"scheduled_for"`
+	StartedAt       pgtype.Timestamptz `db:"started_at" json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
 	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// JWT refresh tokens for session management
+type RefreshToken struct {
+	ID        uuid.UUID          `db:"id" json:"id"`
+	UserID    uuid.UUID          `db:"user_id" json:"user_id"`
+	TokenHash string             `db:"token_hash" json:"token_hash"`
+	ExpiresAt time.Time          `db:"expires_at" json:"expires_at"`
+	Revoked   *bool              `db:"revoked" json:"revoked"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+// Role-based access control
 type Role struct {
 	ID          uuid.UUID          `db:"id" json:"id"`
 	Name        string             `db:"name" json:"name"`
@@ -909,6 +879,7 @@ type Role struct {
 	UpdatedAt   pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// Posts scheduled for future publishing
 type ScheduledPost struct {
 	ID                      uuid.UUID          `db:"id" json:"id"`
 	TeamID                  uuid.UUID          `db:"team_id" json:"team_id"`
@@ -921,13 +892,15 @@ type ScheduledPost struct {
 	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
 	PublishedAt             pgtype.Timestamptz `db:"published_at" json:"published_at"`
 	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
 	ErrorMessage            *string            `db:"error_message" json:"error_message"`
+	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
+	MaxRetries              *int32             `db:"max_retries" json:"max_retries"`
 	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DeletedAt               pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
 }
 
+// Connected social media accounts
 type SocialAccount struct {
 	ID             uuid.UUID               `db:"id" json:"id"`
 	TeamID         uuid.UUID               `db:"team_id" json:"team_id"`
@@ -948,6 +921,7 @@ type SocialAccount struct {
 	DeletedAt      pgtype.Timestamptz      `db:"deleted_at" json:"deleted_at"`
 }
 
+// OAuth tokens for social platforms (encrypted)
 type SocialToken struct {
 	ID              uuid.UUID          `db:"id" json:"id"`
 	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
@@ -960,25 +934,26 @@ type SocialToken struct {
 	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// Team subscriptions
 type Subscription struct {
 	ID                   uuid.UUID              `db:"id" json:"id"`
 	TeamID               uuid.UUID              `db:"team_id" json:"team_id"`
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
+	Interval             PlanInterval           `db:"interval" json:"interval"`
 	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
 	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
 	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
 	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
 	CancelAtPeriodEnd    *bool                  `db:"cancel_at_period_end" json:"cancel_at_period_end"`
 	CanceledAt           pgtype.Timestamptz     `db:"canceled_at" json:"canceled_at"`
-	EndedAt              pgtype.Timestamptz     `db:"ended_at" json:"ended_at"`
 	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
 	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
-	Metadata             []byte                 `db:"metadata" json:"metadata"`
 	CreatedAt            pgtype.Timestamptz     `db:"created_at" json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz     `db:"updated_at" json:"updated_at"`
 }
 
+// Organizations/teams for multi-tenancy
 type Team struct {
 	ID        uuid.UUID          `db:"id" json:"id"`
 	Name      string             `db:"name" json:"name"`
@@ -992,6 +967,7 @@ type Team struct {
 	DeletedAt pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
 }
 
+// User membership in teams with roles
 type TeamMembership struct {
 	ID                   uuid.UUID          `db:"id" json:"id"`
 	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
@@ -1006,6 +982,7 @@ type TeamMembership struct {
 	DeletedAt            pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
 }
 
+// User accounts with authentication
 type User struct {
 	ID            uuid.UUID          `db:"id" json:"id"`
 	Email         string             `db:"email" json:"email"`
@@ -1022,17 +999,14 @@ type User struct {
 	DeletedAt     pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
 }
 
+// Webhook event log
 type WebhooksLog struct {
-	ID             uuid.UUID          `db:"id" json:"id"`
-	Source         WebhookSource      `db:"source" json:"source"`
-	EventType      string             `db:"event_type" json:"event_type"`
-	Payload        json.RawMessage    `db:"payload" json:"payload"`
-	Headers        []byte             `db:"headers" json:"headers"`
-	Processed      *bool              `db:"processed" json:"processed"`
-	ProcessedAt    pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
-	ResponseStatus *int32             `db:"response_status" json:"response_status"`
-	ResponseBody   *string            `db:"response_body" json:"response_body"`
-	ErrorMessage   *string            `db:"error_message" json:"error_message"`
-	IdempotencyKey *string            `db:"idempotency_key" json:"idempotency_key"`
-	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID          uuid.UUID          `db:"id" json:"id"`
+	Source      WebhookSource      `db:"source" json:"source"`
+	EventType   string             `db:"event_type" json:"event_type"`
+	Payload     json.RawMessage    `db:"payload" json:"payload"`
+	Processed   *bool              `db:"processed" json:"processed"`
+	ProcessedAt pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	Error       *string            `db:"error" json:"error"`
+	ReceivedAt  pgtype.Timestamptz `db:"received_at" json:"received_at"`
 }

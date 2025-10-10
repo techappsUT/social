@@ -12,6 +12,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const CountTeamMembers = `-- name: CountTeamMembers :one
+SELECT COUNT(*)
+FROM team_memberships
+WHERE team_id = $1 
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) CountTeamMembers(ctx context.Context, teamID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, CountTeamMembers, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const CreateTeam = `-- name: CreateTeam :one
 
 INSERT INTO teams (
@@ -35,6 +49,7 @@ type CreateTeamParams struct {
 }
 
 // path: backend/sql/teams.sql
+// 🔄 REFACTORED - Removed duplicate team membership queries
 func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error) {
 	row := q.db.QueryRow(ctx, CreateTeam,
 		arg.Name,
@@ -106,12 +121,12 @@ func (q *Queries) GetTeamBySlug(ctx context.Context, slug string) (Team, error) 
 }
 
 const ListTeamsByUser = `-- name: ListTeamsByUser :many
-SELECT t.id, t.name, t.slug, t.avatar_url, t.settings, t.is_active, t.created_by, t.created_at, t.updated_at, t.deleted_at FROM teams t
+SELECT t.id, t.name, t.slug, t.avatar_url, t.settings, t.is_active, t.created_by, t.created_at, t.updated_at, t.deleted_at
+FROM teams t
 INNER JOIN team_memberships tm ON t.id = tm.team_id
 WHERE tm.user_id = $1 
-  AND t.deleted_at IS NULL 
   AND tm.deleted_at IS NULL
-  AND tm.is_active = true
+  AND t.deleted_at IS NULL
 ORDER BY t.created_at DESC
 `
 
@@ -163,15 +178,17 @@ const UpdateTeam = `-- name: UpdateTeam :one
 UPDATE teams
 SET 
     name = COALESCE($1, name),
-    avatar_url = COALESCE($2, avatar_url),
-    settings = COALESCE($3, settings),
+    slug = COALESCE($2, slug),
+    avatar_url = COALESCE($3, avatar_url),
+    settings = COALESCE($4, settings),
     updated_at = NOW()
-WHERE id = $4 AND deleted_at IS NULL
+WHERE id = $5 AND deleted_at IS NULL
 RETURNING id, name, slug, avatar_url, settings, is_active, created_by, created_at, updated_at, deleted_at
 `
 
 type UpdateTeamParams struct {
 	Name      *string   `db:"name" json:"name"`
+	Slug      *string   `db:"slug" json:"slug"`
 	AvatarUrl *string   `db:"avatar_url" json:"avatar_url"`
 	Settings  []byte    `db:"settings" json:"settings"`
 	ID        uuid.UUID `db:"id" json:"id"`
@@ -180,6 +197,7 @@ type UpdateTeamParams struct {
 func (q *Queries) UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, error) {
 	row := q.db.QueryRow(ctx, UpdateTeam,
 		arg.Name,
+		arg.Slug,
 		arg.AvatarUrl,
 		arg.Settings,
 		arg.ID,

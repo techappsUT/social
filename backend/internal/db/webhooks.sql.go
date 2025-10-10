@@ -12,36 +12,47 @@ import (
 	"github.com/google/uuid"
 )
 
+const CountWebhooksBySource = `-- name: CountWebhooksBySource :one
+SELECT COUNT(*)
+FROM webhooks_log
+WHERE source = $1
+`
+
+func (q *Queries) CountWebhooksBySource(ctx context.Context, source WebhookSource) (int64, error) {
+	row := q.db.QueryRow(ctx, CountWebhooksBySource, source)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const CreateWebhookLog = `-- name: CreateWebhookLog :one
 
 INSERT INTO webhooks_log (
     source,
     event_type,
     payload,
-    headers,
-    idempotency_key
+    processed
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4
 )
-RETURNING id, source, event_type, payload, headers, processed, processed_at, response_status, response_body, error_message, idempotency_key, created_at
+RETURNING id, source, event_type, payload, processed, processed_at, error, received_at
 `
 
 type CreateWebhookLogParams struct {
-	Source         WebhookSource   `db:"source" json:"source"`
-	EventType      string          `db:"event_type" json:"event_type"`
-	Payload        json.RawMessage `db:"payload" json:"payload"`
-	Headers        []byte          `db:"headers" json:"headers"`
-	IdempotencyKey *string         `db:"idempotency_key" json:"idempotency_key"`
+	Source    WebhookSource   `db:"source" json:"source"`
+	EventType string          `db:"event_type" json:"event_type"`
+	Payload   json.RawMessage `db:"payload" json:"payload"`
+	Processed *bool           `db:"processed" json:"processed"`
 }
 
 // path: backend/sql/webhooks.sql
+// 🔄 REFACTORED - Match actual schema (webhooks_log table)
 func (q *Queries) CreateWebhookLog(ctx context.Context, arg CreateWebhookLogParams) (WebhooksLog, error) {
 	row := q.db.QueryRow(ctx, CreateWebhookLog,
 		arg.Source,
 		arg.EventType,
 		arg.Payload,
-		arg.Headers,
-		arg.IdempotencyKey,
+		arg.Processed,
 	)
 	var i WebhooksLog
 	err := row.Scan(
@@ -49,46 +60,38 @@ func (q *Queries) CreateWebhookLog(ctx context.Context, arg CreateWebhookLogPara
 		&i.Source,
 		&i.EventType,
 		&i.Payload,
-		&i.Headers,
 		&i.Processed,
 		&i.ProcessedAt,
-		&i.ResponseStatus,
-		&i.ResponseBody,
-		&i.ErrorMessage,
-		&i.IdempotencyKey,
-		&i.CreatedAt,
+		&i.Error,
+		&i.ReceivedAt,
 	)
 	return i, err
 }
 
-const GetWebhookLog = `-- name: GetWebhookLog :one
-SELECT id, source, event_type, payload, headers, processed, processed_at, response_status, response_body, error_message, idempotency_key, created_at FROM webhooks_log WHERE id = $1
+const GetWebhookLogByID = `-- name: GetWebhookLogByID :one
+SELECT id, source, event_type, payload, processed, processed_at, error, received_at FROM webhooks_log WHERE id = $1
 `
 
-func (q *Queries) GetWebhookLog(ctx context.Context, id uuid.UUID) (WebhooksLog, error) {
-	row := q.db.QueryRow(ctx, GetWebhookLog, id)
+func (q *Queries) GetWebhookLogByID(ctx context.Context, id uuid.UUID) (WebhooksLog, error) {
+	row := q.db.QueryRow(ctx, GetWebhookLogByID, id)
 	var i WebhooksLog
 	err := row.Scan(
 		&i.ID,
 		&i.Source,
 		&i.EventType,
 		&i.Payload,
-		&i.Headers,
 		&i.Processed,
 		&i.ProcessedAt,
-		&i.ResponseStatus,
-		&i.ResponseBody,
-		&i.ErrorMessage,
-		&i.IdempotencyKey,
-		&i.CreatedAt,
+		&i.Error,
+		&i.ReceivedAt,
 	)
 	return i, err
 }
 
 const ListUnprocessedWebhooks = `-- name: ListUnprocessedWebhooks :many
-SELECT id, source, event_type, payload, headers, processed, processed_at, response_status, response_body, error_message, idempotency_key, created_at FROM webhooks_log
-WHERE processed = false
-ORDER BY created_at ASC
+SELECT id, source, event_type, payload, processed, processed_at, error, received_at FROM webhooks_log
+WHERE processed = FALSE
+ORDER BY received_at ASC
 LIMIT $1
 `
 
@@ -106,14 +109,10 @@ func (q *Queries) ListUnprocessedWebhooks(ctx context.Context, limit int32) ([]W
 			&i.Source,
 			&i.EventType,
 			&i.Payload,
-			&i.Headers,
 			&i.Processed,
 			&i.ProcessedAt,
-			&i.ResponseStatus,
-			&i.ResponseBody,
-			&i.ErrorMessage,
-			&i.IdempotencyKey,
-			&i.CreatedAt,
+			&i.Error,
+			&i.ReceivedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -125,41 +124,55 @@ func (q *Queries) ListUnprocessedWebhooks(ctx context.Context, limit int32) ([]W
 	return items, nil
 }
 
-const MarkWebhookFailed = `-- name: MarkWebhookFailed :exec
-UPDATE webhooks_log
-SET 
-    processed = false,
-    error_message = $2
-WHERE id = $1
+const ListWebhookLogs = `-- name: ListWebhookLogs :many
+SELECT id, source, event_type, payload, processed, processed_at, error, received_at FROM webhooks_log
+WHERE source = $1
+ORDER BY received_at DESC
+LIMIT $2 OFFSET $3
 `
 
-type MarkWebhookFailedParams struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	ErrorMessage *string   `db:"error_message" json:"error_message"`
+type ListWebhookLogsParams struct {
+	Source WebhookSource `db:"source" json:"source"`
+	Limit  int32         `db:"limit" json:"limit"`
+	Offset int32         `db:"offset" json:"offset"`
 }
 
-func (q *Queries) MarkWebhookFailed(ctx context.Context, arg MarkWebhookFailedParams) error {
-	_, err := q.db.Exec(ctx, MarkWebhookFailed, arg.ID, arg.ErrorMessage)
-	return err
+func (q *Queries) ListWebhookLogs(ctx context.Context, arg ListWebhookLogsParams) ([]WebhooksLog, error) {
+	rows, err := q.db.Query(ctx, ListWebhookLogs, arg.Source, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WebhooksLog{}
+	for rows.Next() {
+		var i WebhooksLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Source,
+			&i.EventType,
+			&i.Payload,
+			&i.Processed,
+			&i.ProcessedAt,
+			&i.Error,
+			&i.ReceivedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const MarkWebhookProcessed = `-- name: MarkWebhookProcessed :exec
 UPDATE webhooks_log
-SET 
-    processed = true,
-    processed_at = NOW(),
-    response_status = $2,
-    response_body = $3
+SET processed = TRUE
 WHERE id = $1
 `
 
-type MarkWebhookProcessedParams struct {
-	ID             uuid.UUID `db:"id" json:"id"`
-	ResponseStatus *int32    `db:"response_status" json:"response_status"`
-	ResponseBody   *string   `db:"response_body" json:"response_body"`
-}
-
-func (q *Queries) MarkWebhookProcessed(ctx context.Context, arg MarkWebhookProcessedParams) error {
-	_, err := q.db.Exec(ctx, MarkWebhookProcessed, arg.ID, arg.ResponseStatus, arg.ResponseBody)
+func (q *Queries) MarkWebhookProcessed(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, MarkWebhookProcessed, id)
 	return err
 }

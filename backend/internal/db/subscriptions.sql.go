@@ -41,7 +41,7 @@ INSERT INTO subscriptions (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, team_id, plan_id, status, stripe_subscription_id, stripe_customer_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, ended_at, trial_start, trial_end, metadata, created_at, updated_at
+RETURNING id, team_id, plan_id, status, interval, stripe_subscription_id, stripe_customer_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, trial_start, trial_end, created_at, updated_at
 `
 
 type CreateSubscriptionParams struct {
@@ -75,16 +75,15 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		&i.TeamID,
 		&i.PlanID,
 		&i.Status,
+		&i.Interval,
 		&i.StripeSubscriptionID,
 		&i.StripeCustomerID,
 		&i.CurrentPeriodStart,
 		&i.CurrentPeriodEnd,
 		&i.CancelAtPeriodEnd,
 		&i.CanceledAt,
-		&i.EndedAt,
 		&i.TrialStart,
 		&i.TrialEnd,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -92,7 +91,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 }
 
 const GetSubscriptionByStripeID = `-- name: GetSubscriptionByStripeID :one
-SELECT id, team_id, plan_id, status, stripe_subscription_id, stripe_customer_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, ended_at, trial_start, trial_end, metadata, created_at, updated_at FROM subscriptions
+SELECT id, team_id, plan_id, status, interval, stripe_subscription_id, stripe_customer_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, trial_start, trial_end, created_at, updated_at FROM subscriptions
 WHERE stripe_subscription_id = $1
 `
 
@@ -104,16 +103,15 @@ func (q *Queries) GetSubscriptionByStripeID(ctx context.Context, stripeSubscript
 		&i.TeamID,
 		&i.PlanID,
 		&i.Status,
+		&i.Interval,
 		&i.StripeSubscriptionID,
 		&i.StripeCustomerID,
 		&i.CurrentPeriodStart,
 		&i.CurrentPeriodEnd,
 		&i.CancelAtPeriodEnd,
 		&i.CanceledAt,
-		&i.EndedAt,
 		&i.TrialStart,
 		&i.TrialEnd,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -121,7 +119,7 @@ func (q *Queries) GetSubscriptionByStripeID(ctx context.Context, stripeSubscript
 }
 
 const GetSubscriptionByTeamID = `-- name: GetSubscriptionByTeamID :one
-SELECT s.id, s.team_id, s.plan_id, s.status, s.stripe_subscription_id, s.stripe_customer_id, s.current_period_start, s.current_period_end, s.cancel_at_period_end, s.canceled_at, s.ended_at, s.trial_start, s.trial_end, s.metadata, s.created_at, s.updated_at, p.name as plan_name, p.features as plan_features
+SELECT s.id, s.team_id, s.plan_id, s.status, s.interval, s.stripe_subscription_id, s.stripe_customer_id, s.current_period_start, s.current_period_end, s.cancel_at_period_end, s.canceled_at, s.trial_start, s.trial_end, s.created_at, s.updated_at, p.name as plan_name, p.features as plan_features
 FROM subscriptions s
 INNER JOIN plans p ON s.plan_id = p.id
 WHERE s.team_id = $1
@@ -132,16 +130,15 @@ type GetSubscriptionByTeamIDRow struct {
 	TeamID               uuid.UUID              `db:"team_id" json:"team_id"`
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
+	Interval             PlanInterval           `db:"interval" json:"interval"`
 	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
 	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
 	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
 	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
 	CancelAtPeriodEnd    *bool                  `db:"cancel_at_period_end" json:"cancel_at_period_end"`
 	CanceledAt           pgtype.Timestamptz     `db:"canceled_at" json:"canceled_at"`
-	EndedAt              pgtype.Timestamptz     `db:"ended_at" json:"ended_at"`
 	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
 	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
-	Metadata             []byte                 `db:"metadata" json:"metadata"`
 	CreatedAt            pgtype.Timestamptz     `db:"created_at" json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz     `db:"updated_at" json:"updated_at"`
 	PlanName             string                 `db:"plan_name" json:"plan_name"`
@@ -156,16 +153,15 @@ func (q *Queries) GetSubscriptionByTeamID(ctx context.Context, teamID uuid.UUID)
 		&i.TeamID,
 		&i.PlanID,
 		&i.Status,
+		&i.Interval,
 		&i.StripeSubscriptionID,
 		&i.StripeCustomerID,
 		&i.CurrentPeriodStart,
 		&i.CurrentPeriodEnd,
 		&i.CancelAtPeriodEnd,
 		&i.CanceledAt,
-		&i.EndedAt,
 		&i.TrialStart,
 		&i.TrialEnd,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PlanName,
@@ -175,7 +171,7 @@ func (q *Queries) GetSubscriptionByTeamID(ctx context.Context, teamID uuid.UUID)
 }
 
 const ListExpiringSubscriptions = `-- name: ListExpiringSubscriptions :many
-SELECT s.id, s.team_id, s.plan_id, s.status, s.stripe_subscription_id, s.stripe_customer_id, s.current_period_start, s.current_period_end, s.cancel_at_period_end, s.canceled_at, s.ended_at, s.trial_start, s.trial_end, s.metadata, s.created_at, s.updated_at, t.name as team_name
+SELECT s.id, s.team_id, s.plan_id, s.status, s.interval, s.stripe_subscription_id, s.stripe_customer_id, s.current_period_start, s.current_period_end, s.cancel_at_period_end, s.canceled_at, s.trial_start, s.trial_end, s.created_at, s.updated_at, t.name as team_name
 FROM subscriptions s
 INNER JOIN teams t ON s.team_id = t.id
 WHERE s.status = 'active'
@@ -194,16 +190,15 @@ type ListExpiringSubscriptionsRow struct {
 	TeamID               uuid.UUID              `db:"team_id" json:"team_id"`
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
+	Interval             PlanInterval           `db:"interval" json:"interval"`
 	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
 	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
 	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
 	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
 	CancelAtPeriodEnd    *bool                  `db:"cancel_at_period_end" json:"cancel_at_period_end"`
 	CanceledAt           pgtype.Timestamptz     `db:"canceled_at" json:"canceled_at"`
-	EndedAt              pgtype.Timestamptz     `db:"ended_at" json:"ended_at"`
 	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
 	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
-	Metadata             []byte                 `db:"metadata" json:"metadata"`
 	CreatedAt            pgtype.Timestamptz     `db:"created_at" json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz     `db:"updated_at" json:"updated_at"`
 	TeamName             string                 `db:"team_name" json:"team_name"`
@@ -223,16 +218,15 @@ func (q *Queries) ListExpiringSubscriptions(ctx context.Context, arg ListExpirin
 			&i.TeamID,
 			&i.PlanID,
 			&i.Status,
+			&i.Interval,
 			&i.StripeSubscriptionID,
 			&i.StripeCustomerID,
 			&i.CurrentPeriodStart,
 			&i.CurrentPeriodEnd,
 			&i.CancelAtPeriodEnd,
 			&i.CanceledAt,
-			&i.EndedAt,
 			&i.TrialStart,
 			&i.TrialEnd,
-			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TeamName,

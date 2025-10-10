@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const CompleteQueueItem = `-- name: CompleteQueueItem :exec
-UPDATE post_queue SET 
+UPDATE post_queue
+SET 
     status = 'completed',
     completed_at = NOW(),
     updated_at = NOW()
@@ -25,33 +27,43 @@ func (q *Queries) CompleteQueueItem(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const CountQueuedPostsByStatus = `-- name: CountQueuedPostsByStatus :one
+SELECT COUNT(*) FROM post_queue
+WHERE status = $1
+`
+
+func (q *Queries) CountQueuedPostsByStatus(ctx context.Context, status NullQueueStatus) (int64, error) {
+	row := q.db.QueryRow(ctx, CountQueuedPostsByStatus, status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const EnqueuePost = `-- name: EnqueuePost :one
 
 INSERT INTO post_queue (
     scheduled_post_id,
-    status,
     priority,
     scheduled_for,
     max_attempts
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4
 )
-RETURNING id, scheduled_post_id, status, priority, scheduled_for, attempt_count, max_attempts, last_error, worker_id, locked_at, lock_expires_at, completed_at, created_at, updated_at
+RETURNING id, scheduled_post_id, status, priority, attempts, max_attempts, error, scheduled_for, started_at, completed_at, created_at, updated_at
 `
 
 type EnqueuePostParams struct {
-	ScheduledPostID uuid.UUID       `db:"scheduled_post_id" json:"scheduled_post_id"`
-	Status          NullQueueStatus `db:"status" json:"status"`
-	Priority        *int32          `db:"priority" json:"priority"`
-	ScheduledFor    time.Time       `db:"scheduled_for" json:"scheduled_for"`
-	MaxAttempts     *int32          `db:"max_attempts" json:"max_attempts"`
+	ScheduledPostID uuid.UUID `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Priority        *int32    `db:"priority" json:"priority"`
+	ScheduledFor    time.Time `db:"scheduled_for" json:"scheduled_for"`
+	MaxAttempts     *int32    `db:"max_attempts" json:"max_attempts"`
 }
 
 // path: backend/sql/post_queue.sql
+// 🔄 REFACTORED - Use max_attempts and error (not max_retries, error_message)
 func (q *Queries) EnqueuePost(ctx context.Context, arg EnqueuePostParams) (PostQueue, error) {
 	row := q.db.QueryRow(ctx, EnqueuePost,
 		arg.ScheduledPostID,
-		arg.Status,
 		arg.Priority,
 		arg.ScheduledFor,
 		arg.MaxAttempts,
@@ -62,13 +74,11 @@ func (q *Queries) EnqueuePost(ctx context.Context, arg EnqueuePostParams) (PostQ
 		&i.ScheduledPostID,
 		&i.Status,
 		&i.Priority,
-		&i.ScheduledFor,
-		&i.AttemptCount,
+		&i.Attempts,
 		&i.MaxAttempts,
-		&i.LastError,
-		&i.WorkerID,
-		&i.LockedAt,
-		&i.LockExpiresAt,
+		&i.Error,
+		&i.ScheduledFor,
+		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -77,82 +87,38 @@ func (q *Queries) EnqueuePost(ctx context.Context, arg EnqueuePostParams) (PostQ
 }
 
 const FailQueueItem = `-- name: FailQueueItem :exec
-UPDATE post_queue SET 
+UPDATE post_queue
+SET 
     status = CASE 
-        WHEN attempt_count + 1 >= max_attempts THEN 'failed'::queue_status
-        ELSE 'retrying'::queue_status
+        WHEN attempts >= max_attempts THEN 'failed'::queue_status
+        ELSE 'pending'::queue_status
     END,
-    attempt_count = attempt_count + 1,
-    last_error = $2,
+    error = $2,
     updated_at = NOW()
 WHERE id = $1
 `
 
 type FailQueueItemParams struct {
-	ID        uuid.UUID `db:"id" json:"id"`
-	LastError *string   `db:"last_error" json:"last_error"`
+	ID    uuid.UUID `db:"id" json:"id"`
+	Error *string   `db:"error" json:"error"`
 }
 
 func (q *Queries) FailQueueItem(ctx context.Context, arg FailQueueItemParams) error {
-	_, err := q.db.Exec(ctx, FailQueueItem, arg.ID, arg.LastError)
+	_, err := q.db.Exec(ctx, FailQueueItem, arg.ID, arg.Error)
 	return err
 }
 
-const GetQueueItem = `-- name: GetQueueItem :one
-SELECT id, scheduled_post_id, status, priority, scheduled_for, attempt_count, max_attempts, last_error, worker_id, locked_at, lock_expires_at, completed_at, created_at, updated_at FROM post_queue
-WHERE id = $1
+const GetNextQueuedPosts = `-- name: GetNextQueuedPosts :many
+SELECT id, scheduled_post_id, status, priority, attempts, max_attempts, error, scheduled_for, started_at, completed_at, created_at, updated_at FROM post_queue
+WHERE status = 'pending'
+  AND scheduled_for <= NOW()
+ORDER BY priority DESC, scheduled_for ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED
 `
 
-func (q *Queries) GetQueueItem(ctx context.Context, id uuid.UUID) (PostQueue, error) {
-	row := q.db.QueryRow(ctx, GetQueueItem, id)
-	var i PostQueue
-	err := row.Scan(
-		&i.ID,
-		&i.ScheduledPostID,
-		&i.Status,
-		&i.Priority,
-		&i.ScheduledFor,
-		&i.AttemptCount,
-		&i.MaxAttempts,
-		&i.LastError,
-		&i.WorkerID,
-		&i.LockedAt,
-		&i.LockExpiresAt,
-		&i.CompletedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const LockNextQueueItems = `-- name: LockNextQueueItems :many
-UPDATE post_queue SET 
-    status = 'processing',
-    worker_id = $1,
-    locked_at = NOW(),
-    lock_expires_at = NOW() + INTERVAL '5 minutes',
-    updated_at = NOW()
-WHERE id IN (
-    SELECT pq.id 
-    FROM post_queue pq
-    WHERE pq.status = 'pending'
-      AND pq.scheduled_for <= $2
-      AND (pq.lock_expires_at IS NULL OR pq.lock_expires_at < NOW())
-    ORDER BY pq.priority ASC, pq.scheduled_for ASC
-    LIMIT $3
-    FOR UPDATE SKIP LOCKED
-)
-RETURNING id, scheduled_post_id, status, priority, scheduled_for, attempt_count, max_attempts, last_error, worker_id, locked_at, lock_expires_at, completed_at, created_at, updated_at
-`
-
-type LockNextQueueItemsParams struct {
-	WorkerID     *string   `db:"worker_id" json:"worker_id"`
-	ScheduledFor time.Time `db:"scheduled_for" json:"scheduled_for"`
-	Limit        int32     `db:"limit" json:"limit"`
-}
-
-func (q *Queries) LockNextQueueItems(ctx context.Context, arg LockNextQueueItemsParams) ([]PostQueue, error) {
-	rows, err := q.db.Query(ctx, LockNextQueueItems, arg.WorkerID, arg.ScheduledFor, arg.Limit)
+func (q *Queries) GetNextQueuedPosts(ctx context.Context, limit int32) ([]PostQueue, error) {
+	rows, err := q.db.Query(ctx, GetNextQueuedPosts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -165,13 +131,11 @@ func (q *Queries) LockNextQueueItems(ctx context.Context, arg LockNextQueueItems
 			&i.ScheduledPostID,
 			&i.Status,
 			&i.Priority,
-			&i.ScheduledFor,
-			&i.AttemptCount,
+			&i.Attempts,
 			&i.MaxAttempts,
-			&i.LastError,
-			&i.WorkerID,
-			&i.LockedAt,
-			&i.LockExpiresAt,
+			&i.Error,
+			&i.ScheduledFor,
+			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -186,18 +150,176 @@ func (q *Queries) LockNextQueueItems(ctx context.Context, arg LockNextQueueItems
 	return items, nil
 }
 
-const ResetStaleLocks = `-- name: ResetStaleLocks :exec
-UPDATE post_queue SET 
-    status = 'pending',
-    worker_id = NULL,
-    locked_at = NULL,
-    lock_expires_at = NULL,
-    updated_at = NOW()
-WHERE status = 'processing'
-  AND lock_expires_at < NOW()
+const GetQueueItemByID = `-- name: GetQueueItemByID :one
+SELECT id, scheduled_post_id, status, priority, attempts, max_attempts, error, scheduled_for, started_at, completed_at, created_at, updated_at FROM post_queue WHERE id = $1
 `
 
-func (q *Queries) ResetStaleLocks(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, ResetStaleLocks)
+func (q *Queries) GetQueueItemByID(ctx context.Context, id uuid.UUID) (PostQueue, error) {
+	row := q.db.QueryRow(ctx, GetQueueItemByID, id)
+	var i PostQueue
+	err := row.Scan(
+		&i.ID,
+		&i.ScheduledPostID,
+		&i.Status,
+		&i.Priority,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.Error,
+		&i.ScheduledFor,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const ListPendingQueueItems = `-- name: ListPendingQueueItems :many
+SELECT 
+    pq.id, pq.scheduled_post_id, pq.status, pq.priority, pq.attempts, pq.max_attempts, pq.error, pq.scheduled_for, pq.started_at, pq.completed_at, pq.created_at, pq.updated_at,
+    sp.content,
+    sa.platform,
+    sa.username
+FROM post_queue pq
+INNER JOIN scheduled_posts sp ON pq.scheduled_post_id = sp.id
+INNER JOIN social_accounts sa ON sp.social_account_id = sa.id
+WHERE pq.status = 'pending'
+  AND pq.scheduled_for <= $1
+ORDER BY pq.priority DESC, pq.scheduled_for ASC
+LIMIT $2
+`
+
+type ListPendingQueueItemsParams struct {
+	ScheduledFor time.Time `db:"scheduled_for" json:"scheduled_for"`
+	Limit        int32     `db:"limit" json:"limit"`
+}
+
+type ListPendingQueueItemsRow struct {
+	ID              uuid.UUID          `db:"id" json:"id"`
+	ScheduledPostID uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Status          NullQueueStatus    `db:"status" json:"status"`
+	Priority        *int32             `db:"priority" json:"priority"`
+	Attempts        *int32             `db:"attempts" json:"attempts"`
+	MaxAttempts     *int32             `db:"max_attempts" json:"max_attempts"`
+	Error           *string            `db:"error" json:"error"`
+	ScheduledFor    time.Time          `db:"scheduled_for" json:"scheduled_for"`
+	StartedAt       pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Content         string             `db:"content" json:"content"`
+	Platform        SocialPlatform     `db:"platform" json:"platform"`
+	Username        *string            `db:"username" json:"username"`
+}
+
+func (q *Queries) ListPendingQueueItems(ctx context.Context, arg ListPendingQueueItemsParams) ([]ListPendingQueueItemsRow, error) {
+	rows, err := q.db.Query(ctx, ListPendingQueueItems, arg.ScheduledFor, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingQueueItemsRow{}
+	for rows.Next() {
+		var i ListPendingQueueItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScheduledPostID,
+			&i.Status,
+			&i.Priority,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.Error,
+			&i.ScheduledFor,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Content,
+			&i.Platform,
+			&i.Username,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const ListQueuedPostsByStatus = `-- name: ListQueuedPostsByStatus :many
+SELECT id, scheduled_post_id, status, priority, attempts, max_attempts, error, scheduled_for, started_at, completed_at, created_at, updated_at FROM post_queue
+WHERE status = $1
+ORDER BY scheduled_for DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListQueuedPostsByStatusParams struct {
+	Status NullQueueStatus `db:"status" json:"status"`
+	Limit  int32           `db:"limit" json:"limit"`
+	Offset int32           `db:"offset" json:"offset"`
+}
+
+func (q *Queries) ListQueuedPostsByStatus(ctx context.Context, arg ListQueuedPostsByStatusParams) ([]PostQueue, error) {
+	rows, err := q.db.Query(ctx, ListQueuedPostsByStatus, arg.Status, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PostQueue{}
+	for rows.Next() {
+		var i PostQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScheduledPostID,
+			&i.Status,
+			&i.Priority,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.Error,
+			&i.ScheduledFor,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const LockQueueItem = `-- name: LockQueueItem :exec
+UPDATE post_queue
+SET 
+    status = 'processing',
+    started_at = NOW(),
+    attempts = attempts + 1,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) LockQueueItem(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, LockQueueItem, id)
+	return err
+}
+
+const RetryFailedQueueItem = `-- name: RetryFailedQueueItem :exec
+UPDATE post_queue
+SET 
+    status = 'pending',
+    error = NULL,
+    attempts = 0,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) RetryFailedQueueItem(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, RetryFailedQueueItem, id)
 	return err
 }

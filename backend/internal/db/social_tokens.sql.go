@@ -12,85 +12,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const GetSocialToken = `-- name: GetSocialToken :one
-SELECT id, social_account_id, access_token, refresh_token, token_type, expires_at, scope, created_at, updated_at FROM social_tokens
-WHERE social_account_id = $1
-`
-
-func (q *Queries) GetSocialToken(ctx context.Context, socialAccountID uuid.UUID) (SocialToken, error) {
-	row := q.db.QueryRow(ctx, GetSocialToken, socialAccountID)
-	var i SocialToken
-	err := row.Scan(
-		&i.ID,
-		&i.SocialAccountID,
-		&i.AccessToken,
-		&i.RefreshToken,
-		&i.TokenType,
-		&i.ExpiresAt,
-		&i.Scope,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const ListExpiringTokens = `-- name: ListExpiringTokens :many
-SELECT st.id, st.social_account_id, st.access_token, st.refresh_token, st.token_type, st.expires_at, st.scope, st.created_at, st.updated_at, sa.team_id, sa.platform
+const CountSocialTokensByTeam = `-- name: CountSocialTokensByTeam :one
+SELECT COUNT(*)
 FROM social_tokens st
 INNER JOIN social_accounts sa ON st.social_account_id = sa.id
-WHERE st.expires_at < $1
-  AND sa.status = 'active'
+WHERE sa.team_id = $1
   AND sa.deleted_at IS NULL
-ORDER BY st.expires_at ASC
 `
 
-type ListExpiringTokensRow struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	AccessToken     string             `db:"access_token" json:"access_token"`
-	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
-	TokenType       *string            `db:"token_type" json:"token_type"`
-	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	Scope           *string            `db:"scope" json:"scope"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	TeamID          uuid.UUID          `db:"team_id" json:"team_id"`
-	Platform        SocialPlatform     `db:"platform" json:"platform"`
+func (q *Queries) CountSocialTokensByTeam(ctx context.Context, teamID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, CountSocialTokensByTeam, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
-func (q *Queries) ListExpiringTokens(ctx context.Context, expiresAt pgtype.Timestamptz) ([]ListExpiringTokensRow, error) {
-	rows, err := q.db.Query(ctx, ListExpiringTokens, expiresAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListExpiringTokensRow{}
-	for rows.Next() {
-		var i ListExpiringTokensRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.SocialAccountID,
-			&i.AccessToken,
-			&i.RefreshToken,
-			&i.TokenType,
-			&i.ExpiresAt,
-			&i.Scope,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.TeamID,
-			&i.Platform,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const UpsertSocialToken = `-- name: UpsertSocialToken :one
+const CreateSocialToken = `-- name: CreateSocialToken :one
 
 INSERT INTO social_tokens (
     social_account_id,
@@ -102,18 +39,10 @@ INSERT INTO social_tokens (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-ON CONFLICT (social_account_id) 
-DO UPDATE SET
-    access_token = EXCLUDED.access_token,
-    refresh_token = EXCLUDED.refresh_token,
-    token_type = EXCLUDED.token_type,
-    expires_at = EXCLUDED.expires_at,
-    scope = EXCLUDED.scope,
-    updated_at = NOW()
 RETURNING id, social_account_id, access_token, refresh_token, token_type, expires_at, scope, created_at, updated_at
 `
 
-type UpsertSocialTokenParams struct {
+type CreateSocialTokenParams struct {
 	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
 	AccessToken     string             `db:"access_token" json:"access_token"`
 	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
@@ -123,8 +52,9 @@ type UpsertSocialTokenParams struct {
 }
 
 // path: backend/sql/social_tokens.sql
-func (q *Queries) UpsertSocialToken(ctx context.Context, arg UpsertSocialTokenParams) (SocialToken, error) {
-	row := q.db.QueryRow(ctx, UpsertSocialToken,
+// 🔄 REFACTORED - Fixed syntax and removed duplicates
+func (q *Queries) CreateSocialToken(ctx context.Context, arg CreateSocialTokenParams) (SocialToken, error) {
+	row := q.db.QueryRow(ctx, CreateSocialToken,
 		arg.SocialAccountID,
 		arg.AccessToken,
 		arg.RefreshToken,
@@ -145,4 +75,162 @@ func (q *Queries) UpsertSocialToken(ctx context.Context, arg UpsertSocialTokenPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const DeleteSocialToken = `-- name: DeleteSocialToken :exec
+DELETE FROM social_tokens
+WHERE social_account_id = $1
+`
+
+func (q *Queries) DeleteSocialToken(ctx context.Context, socialAccountID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, DeleteSocialToken, socialAccountID)
+	return err
+}
+
+const GetExpiringSocialTokens = `-- name: GetExpiringSocialTokens :many
+SELECT 
+    st.id, st.social_account_id, st.access_token, st.refresh_token, st.token_type, st.expires_at, st.scope, st.created_at, st.updated_at,
+    sa.platform,
+    sa.platform_user_id,
+    sa.username,
+    sa.team_id
+FROM social_tokens st
+INNER JOIN social_accounts sa ON st.social_account_id = sa.id
+WHERE st.expires_at IS NOT NULL 
+  AND st.expires_at < NOW() + INTERVAL '7 days'
+  AND sa.deleted_at IS NULL
+  AND sa.status = 'active'
+ORDER BY st.expires_at ASC
+`
+
+type GetExpiringSocialTokensRow struct {
+	ID              uuid.UUID          `db:"id" json:"id"`
+	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	AccessToken     string             `db:"access_token" json:"access_token"`
+	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
+	TokenType       *string            `db:"token_type" json:"token_type"`
+	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	Scope           *string            `db:"scope" json:"scope"`
+	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Platform        SocialPlatform     `db:"platform" json:"platform"`
+	PlatformUserID  string             `db:"platform_user_id" json:"platform_user_id"`
+	Username        *string            `db:"username" json:"username"`
+	TeamID          uuid.UUID          `db:"team_id" json:"team_id"`
+}
+
+func (q *Queries) GetExpiringSocialTokens(ctx context.Context) ([]GetExpiringSocialTokensRow, error) {
+	rows, err := q.db.Query(ctx, GetExpiringSocialTokens)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetExpiringSocialTokensRow{}
+	for rows.Next() {
+		var i GetExpiringSocialTokensRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SocialAccountID,
+			&i.AccessToken,
+			&i.RefreshToken,
+			&i.TokenType,
+			&i.ExpiresAt,
+			&i.Scope,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Platform,
+			&i.PlatformUserID,
+			&i.Username,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const GetSocialTokenByAccountID = `-- name: GetSocialTokenByAccountID :one
+SELECT id, social_account_id, access_token, refresh_token, token_type, expires_at, scope, created_at, updated_at FROM social_tokens
+WHERE social_account_id = $1
+`
+
+func (q *Queries) GetSocialTokenByAccountID(ctx context.Context, socialAccountID uuid.UUID) (SocialToken, error) {
+	row := q.db.QueryRow(ctx, GetSocialTokenByAccountID, socialAccountID)
+	var i SocialToken
+	err := row.Scan(
+		&i.ID,
+		&i.SocialAccountID,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.TokenType,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const UpdateSocialToken = `-- name: UpdateSocialToken :exec
+UPDATE social_tokens
+SET 
+    access_token = COALESCE($1, access_token),
+    refresh_token = COALESCE($2, refresh_token),
+    token_type = COALESCE($3, token_type),
+    expires_at = COALESCE($4, expires_at),
+    scope = COALESCE($5, scope),
+    updated_at = NOW()
+WHERE social_account_id = $6
+`
+
+type UpdateSocialTokenParams struct {
+	AccessToken     *string            `db:"access_token" json:"access_token"`
+	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
+	TokenType       *string            `db:"token_type" json:"token_type"`
+	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	Scope           *string            `db:"scope" json:"scope"`
+	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+}
+
+func (q *Queries) UpdateSocialToken(ctx context.Context, arg UpdateSocialTokenParams) error {
+	_, err := q.db.Exec(ctx, UpdateSocialToken,
+		arg.AccessToken,
+		arg.RefreshToken,
+		arg.TokenType,
+		arg.ExpiresAt,
+		arg.Scope,
+		arg.SocialAccountID,
+	)
+	return err
+}
+
+const UpdateSocialTokens = `-- name: UpdateSocialTokens :exec
+UPDATE social_tokens
+SET 
+    access_token = $2,
+    refresh_token = $3,
+    expires_at = $4,
+    updated_at = NOW()
+WHERE social_account_id = $1
+`
+
+type UpdateSocialTokensParams struct {
+	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	AccessToken     string             `db:"access_token" json:"access_token"`
+	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
+	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+}
+
+func (q *Queries) UpdateSocialTokens(ctx context.Context, arg UpdateSocialTokensParams) error {
+	_, err := q.db.Exec(ctx, UpdateSocialTokens,
+		arg.SocialAccountID,
+		arg.AccessToken,
+		arg.RefreshToken,
+		arg.ExpiresAt,
+	)
+	return err
 }

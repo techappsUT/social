@@ -7,357 +7,209 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const GetAnalyticsByPlatform = `-- name: GetAnalyticsByPlatform :many
-SELECT 
-    sa.platform,
-    COUNT(p.id) as post_count,
-    COALESCE(SUM(p.impressions), 0) as total_impressions,
-    COALESCE(SUM(p.engagements), 0) as total_engagements,
-    COALESCE(SUM(p.clicks), 0) as total_clicks
-FROM posts p
-INNER JOIN social_accounts sa ON p.social_account_id = sa.id
-WHERE p.team_id = $1
-  AND p.published_at BETWEEN $2 AND $3
-GROUP BY sa.platform
-ORDER BY total_engagements DESC
-`
-
-type GetAnalyticsByPlatformParams struct {
-	TeamID        uuid.UUID `db:"team_id" json:"team_id"`
-	PublishedAt   time.Time `db:"published_at" json:"published_at"`
-	PublishedAt_2 time.Time `db:"published_at_2" json:"published_at_2"`
-}
-
-type GetAnalyticsByPlatformRow struct {
-	Platform         SocialPlatform `db:"platform" json:"platform"`
-	PostCount        int64          `db:"post_count" json:"post_count"`
-	TotalImpressions interface{}    `db:"total_impressions" json:"total_impressions"`
-	TotalEngagements interface{}    `db:"total_engagements" json:"total_engagements"`
-	TotalClicks      interface{}    `db:"total_clicks" json:"total_clicks"`
-}
-
-func (q *Queries) GetAnalyticsByPlatform(ctx context.Context, arg GetAnalyticsByPlatformParams) ([]GetAnalyticsByPlatformRow, error) {
-	rows, err := q.db.Query(ctx, GetAnalyticsByPlatform, arg.TeamID, arg.PublishedAt, arg.PublishedAt_2)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetAnalyticsByPlatformRow{}
-	for rows.Next() {
-		var i GetAnalyticsByPlatformRow
-		if err := rows.Scan(
-			&i.Platform,
-			&i.PostCount,
-			&i.TotalImpressions,
-			&i.TotalEngagements,
-			&i.TotalClicks,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const GetAnalyticsByPost = `-- name: GetAnalyticsByPost :many
-SELECT 
-    event_type,
-    SUM(event_value) as total_value,
-    COUNT(*) as event_count
-FROM analytics_events
-WHERE post_id = $1
-GROUP BY event_type
-`
-
-type GetAnalyticsByPostRow struct {
-	EventType  EventType `db:"event_type" json:"event_type"`
-	TotalValue int64     `db:"total_value" json:"total_value"`
-	EventCount int64     `db:"event_count" json:"event_count"`
-}
-
-func (q *Queries) GetAnalyticsByPost(ctx context.Context, postID uuid.UUID) ([]GetAnalyticsByPostRow, error) {
-	rows, err := q.db.Query(ctx, GetAnalyticsByPost, postID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetAnalyticsByPostRow{}
-	for rows.Next() {
-		var i GetAnalyticsByPostRow
-		if err := rows.Scan(&i.EventType, &i.TotalValue, &i.EventCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const GetAnalyticsTimeSeries = `-- name: GetAnalyticsTimeSeries :many
-SELECT 
-    DATE(p.published_at) as date,
-    COUNT(p.id) as posts,
-    COALESCE(SUM(p.impressions), 0) as impressions,
-    COALESCE(SUM(p.engagements), 0) as engagements,
-    COALESCE(SUM(p.clicks), 0) as clicks
-FROM posts p
-WHERE p.team_id = $1
-  AND p.published_at BETWEEN $2 AND $3
-GROUP BY DATE(p.published_at)
-ORDER BY date ASC
-`
-
-type GetAnalyticsTimeSeriesParams struct {
-	TeamID        uuid.UUID `db:"team_id" json:"team_id"`
-	PublishedAt   time.Time `db:"published_at" json:"published_at"`
-	PublishedAt_2 time.Time `db:"published_at_2" json:"published_at_2"`
-}
-
-type GetAnalyticsTimeSeriesRow struct {
-	Date        pgtype.Date `db:"date" json:"date"`
-	Posts       int64       `db:"posts" json:"posts"`
-	Impressions interface{} `db:"impressions" json:"impressions"`
-	Engagements interface{} `db:"engagements" json:"engagements"`
-	Clicks      interface{} `db:"clicks" json:"clicks"`
-}
-
-func (q *Queries) GetAnalyticsTimeSeries(ctx context.Context, arg GetAnalyticsTimeSeriesParams) ([]GetAnalyticsTimeSeriesRow, error) {
-	rows, err := q.db.Query(ctx, GetAnalyticsTimeSeries, arg.TeamID, arg.PublishedAt, arg.PublishedAt_2)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetAnalyticsTimeSeriesRow{}
-	for rows.Next() {
-		var i GetAnalyticsTimeSeriesRow
-		if err := rows.Scan(
-			&i.Date,
-			&i.Posts,
-			&i.Impressions,
-			&i.Engagements,
-			&i.Clicks,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const GetTeamAnalyticsSummary = `-- name: GetTeamAnalyticsSummary :one
-SELECT 
-    COUNT(DISTINCT p.id) as total_posts,
-    COALESCE(SUM(p.impressions), 0) as total_impressions,
-    COALESCE(SUM(p.engagements), 0) as total_engagements,
-    COALESCE(SUM(p.clicks), 0) as total_clicks,
-    COALESCE(SUM(p.likes), 0) as total_likes,
-    COALESCE(SUM(p.shares), 0) as total_shares,
-    COALESCE(SUM(p.comments), 0) as total_comments
-FROM posts p
-WHERE p.team_id = $1
-  AND p.published_at BETWEEN $2 AND $3
-`
-
-type GetTeamAnalyticsSummaryParams struct {
-	TeamID        uuid.UUID `db:"team_id" json:"team_id"`
-	PublishedAt   time.Time `db:"published_at" json:"published_at"`
-	PublishedAt_2 time.Time `db:"published_at_2" json:"published_at_2"`
-}
-
-type GetTeamAnalyticsSummaryRow struct {
-	TotalPosts       int64       `db:"total_posts" json:"total_posts"`
-	TotalImpressions interface{} `db:"total_impressions" json:"total_impressions"`
-	TotalEngagements interface{} `db:"total_engagements" json:"total_engagements"`
-	TotalClicks      interface{} `db:"total_clicks" json:"total_clicks"`
-	TotalLikes       interface{} `db:"total_likes" json:"total_likes"`
-	TotalShares      interface{} `db:"total_shares" json:"total_shares"`
-	TotalComments    interface{} `db:"total_comments" json:"total_comments"`
-}
-
-func (q *Queries) GetTeamAnalyticsSummary(ctx context.Context, arg GetTeamAnalyticsSummaryParams) (GetTeamAnalyticsSummaryRow, error) {
-	row := q.db.QueryRow(ctx, GetTeamAnalyticsSummary, arg.TeamID, arg.PublishedAt, arg.PublishedAt_2)
-	var i GetTeamAnalyticsSummaryRow
-	err := row.Scan(
-		&i.TotalPosts,
-		&i.TotalImpressions,
-		&i.TotalEngagements,
-		&i.TotalClicks,
-		&i.TotalLikes,
-		&i.TotalShares,
-		&i.TotalComments,
-	)
-	return i, err
-}
-
-const GetTopPerformingPosts = `-- name: GetTopPerformingPosts :many
-SELECT 
-    p.id, p.scheduled_post_id, p.team_id, p.social_account_id, p.platform_post_id, p.platform_post_url, p.content, p.published_at, p.impressions, p.engagements, p.clicks, p.likes, p.shares, p.comments, p.last_analytics_fetch_at, p.created_at, p.updated_at,
-    sa.platform,
-    sa.username
-FROM posts p
-INNER JOIN social_accounts sa ON p.social_account_id = sa.id
-WHERE p.team_id = $1
-  AND p.published_at BETWEEN $2 AND $3
-ORDER BY 
-    CASE 
-        WHEN $5 = 'impressions' THEN p.impressions
-        WHEN $5 = 'engagements' THEN p.engagements
-        WHEN $5 = 'clicks' THEN p.clicks
-        ELSE p.engagements
-    END DESC
-LIMIT $4
-`
-
-type GetTopPerformingPostsParams struct {
-	TeamID        uuid.UUID   `db:"team_id" json:"team_id"`
-	PublishedAt   time.Time   `db:"published_at" json:"published_at"`
-	PublishedAt_2 time.Time   `db:"published_at_2" json:"published_at_2"`
-	Limit         int32       `db:"limit" json:"limit"`
-	SortBy        interface{} `db:"sort_by" json:"sort_by"`
-}
-
-type GetTopPerformingPostsRow struct {
-	ID                   uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID      uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID      uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID       string             `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl      *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content              *string            `db:"content" json:"content"`
-	PublishedAt          time.Time          `db:"published_at" json:"published_at"`
-	Impressions          *int64             `db:"impressions" json:"impressions"`
-	Engagements          *int64             `db:"engagements" json:"engagements"`
-	Clicks               *int64             `db:"clicks" json:"clicks"`
-	Likes                *int64             `db:"likes" json:"likes"`
-	Shares               *int64             `db:"shares" json:"shares"`
-	Comments             *int64             `db:"comments" json:"comments"`
-	LastAnalyticsFetchAt pgtype.Timestamptz `db:"last_analytics_fetch_at" json:"last_analytics_fetch_at"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Platform             SocialPlatform     `db:"platform" json:"platform"`
-	Username             *string            `db:"username" json:"username"`
-}
-
-func (q *Queries) GetTopPerformingPosts(ctx context.Context, arg GetTopPerformingPostsParams) ([]GetTopPerformingPostsRow, error) {
-	rows, err := q.db.Query(ctx, GetTopPerformingPosts,
-		arg.TeamID,
-		arg.PublishedAt,
-		arg.PublishedAt_2,
-		arg.Limit,
-		arg.SortBy,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetTopPerformingPostsRow{}
-	for rows.Next() {
-		var i GetTopPerformingPostsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ScheduledPostID,
-			&i.TeamID,
-			&i.SocialAccountID,
-			&i.PlatformPostID,
-			&i.PlatformPostUrl,
-			&i.Content,
-			&i.PublishedAt,
-			&i.Impressions,
-			&i.Engagements,
-			&i.Clicks,
-			&i.Likes,
-			&i.Shares,
-			&i.Comments,
-			&i.LastAnalyticsFetchAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Platform,
-			&i.Username,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const InsertAnalyticsEvent = `-- name: InsertAnalyticsEvent :one
+const CreateAnalyticsEvent = `-- name: CreateAnalyticsEvent :one
 
 INSERT INTO analytics_events (
     post_id,
-    team_id,
     event_type,
     event_value,
-    platform,
-    country,
-    device_type,
-    referrer,
-    event_metadata,
-    event_timestamp
+    event_metadata
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4
 )
-RETURNING id, post_id, team_id, event_type, event_value, platform, country, device_type, referrer, event_metadata, event_timestamp, created_at
+RETURNING id, post_id, event_type, event_value, event_metadata, recorded_at
 `
 
-type InsertAnalyticsEventParams struct {
-	PostID         uuid.UUID      `db:"post_id" json:"post_id"`
-	TeamID         uuid.UUID      `db:"team_id" json:"team_id"`
-	EventType      EventType      `db:"event_type" json:"event_type"`
-	EventValue     *int32         `db:"event_value" json:"event_value"`
-	Platform       SocialPlatform `db:"platform" json:"platform"`
-	Country        *string        `db:"country" json:"country"`
-	DeviceType     *string        `db:"device_type" json:"device_type"`
-	Referrer       *string        `db:"referrer" json:"referrer"`
-	EventMetadata  []byte         `db:"event_metadata" json:"event_metadata"`
-	EventTimestamp time.Time      `db:"event_timestamp" json:"event_timestamp"`
+type CreateAnalyticsEventParams struct {
+	PostID        uuid.UUID `db:"post_id" json:"post_id"`
+	EventType     EventType `db:"event_type" json:"event_type"`
+	EventValue    *int32    `db:"event_value" json:"event_value"`
+	EventMetadata []byte    `db:"event_metadata" json:"event_metadata"`
 }
 
 // path: backend/sql/analytics.sql
-func (q *Queries) InsertAnalyticsEvent(ctx context.Context, arg InsertAnalyticsEventParams) (AnalyticsEvent, error) {
-	row := q.db.QueryRow(ctx, InsertAnalyticsEvent,
+// 🔄 REFACTORED - Match actual schema (recorded_at, no team_id, no event_timestamp)
+func (q *Queries) CreateAnalyticsEvent(ctx context.Context, arg CreateAnalyticsEventParams) (AnalyticsEvent, error) {
+	row := q.db.QueryRow(ctx, CreateAnalyticsEvent,
 		arg.PostID,
-		arg.TeamID,
 		arg.EventType,
 		arg.EventValue,
-		arg.Platform,
-		arg.Country,
-		arg.DeviceType,
-		arg.Referrer,
 		arg.EventMetadata,
-		arg.EventTimestamp,
 	)
 	var i AnalyticsEvent
 	err := row.Scan(
 		&i.ID,
 		&i.PostID,
-		&i.TeamID,
 		&i.EventType,
 		&i.EventValue,
-		&i.Platform,
-		&i.Country,
-		&i.DeviceType,
-		&i.Referrer,
 		&i.EventMetadata,
-		&i.EventTimestamp,
-		&i.CreatedAt,
+		&i.RecordedAt,
 	)
 	return i, err
+}
+
+const GetAnalyticsEventsByDateRange = `-- name: GetAnalyticsEventsByDateRange :many
+SELECT ae.id, ae.post_id, ae.event_type, ae.event_value, ae.event_metadata, ae.recorded_at
+FROM analytics_events ae
+INNER JOIN posts p ON ae.post_id = p.id
+WHERE p.team_id = $1
+  AND ae.recorded_at BETWEEN $2 AND $3
+ORDER BY ae.recorded_at DESC
+LIMIT $4 OFFSET $5
+`
+
+type GetAnalyticsEventsByDateRangeParams struct {
+	TeamID       uuid.UUID          `db:"team_id" json:"team_id"`
+	RecordedAt   pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
+	RecordedAt_2 pgtype.Timestamptz `db:"recorded_at_2" json:"recorded_at_2"`
+	Limit        int32              `db:"limit" json:"limit"`
+	Offset       int32              `db:"offset" json:"offset"`
+}
+
+func (q *Queries) GetAnalyticsEventsByDateRange(ctx context.Context, arg GetAnalyticsEventsByDateRangeParams) ([]AnalyticsEvent, error) {
+	rows, err := q.db.Query(ctx, GetAnalyticsEventsByDateRange,
+		arg.TeamID,
+		arg.RecordedAt,
+		arg.RecordedAt_2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AnalyticsEvent{}
+	for rows.Next() {
+		var i AnalyticsEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.PostID,
+			&i.EventType,
+			&i.EventValue,
+			&i.EventMetadata,
+			&i.RecordedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const GetAnalyticsEventsByPost = `-- name: GetAnalyticsEventsByPost :many
+SELECT id, post_id, event_type, event_value, event_metadata, recorded_at FROM analytics_events
+WHERE post_id = $1
+ORDER BY recorded_at DESC
+`
+
+func (q *Queries) GetAnalyticsEventsByPost(ctx context.Context, postID uuid.UUID) ([]AnalyticsEvent, error) {
+	rows, err := q.db.Query(ctx, GetAnalyticsEventsByPost, postID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AnalyticsEvent{}
+	for rows.Next() {
+		var i AnalyticsEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.PostID,
+			&i.EventType,
+			&i.EventValue,
+			&i.EventMetadata,
+			&i.RecordedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const GetAnalyticsSummaryByTeam = `-- name: GetAnalyticsSummaryByTeam :one
+SELECT 
+    COUNT(DISTINCT ae.post_id) as total_posts,
+    COUNT(*) as total_events,
+    COUNT(*) FILTER (WHERE ae.event_type = 'impression') as total_impressions,
+    COUNT(*) FILTER (WHERE ae.event_type IN ('like', 'share', 'comment')) as total_engagements,
+    COUNT(*) FILTER (WHERE ae.event_type = 'click') as total_clicks
+FROM analytics_events ae
+INNER JOIN posts p ON ae.post_id = p.id
+WHERE p.team_id = $1
+  AND ae.recorded_at BETWEEN $2 AND $3
+`
+
+type GetAnalyticsSummaryByTeamParams struct {
+	TeamID       uuid.UUID          `db:"team_id" json:"team_id"`
+	RecordedAt   pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
+	RecordedAt_2 pgtype.Timestamptz `db:"recorded_at_2" json:"recorded_at_2"`
+}
+
+type GetAnalyticsSummaryByTeamRow struct {
+	TotalPosts       int64 `db:"total_posts" json:"total_posts"`
+	TotalEvents      int64 `db:"total_events" json:"total_events"`
+	TotalImpressions int64 `db:"total_impressions" json:"total_impressions"`
+	TotalEngagements int64 `db:"total_engagements" json:"total_engagements"`
+	TotalClicks      int64 `db:"total_clicks" json:"total_clicks"`
+}
+
+func (q *Queries) GetAnalyticsSummaryByTeam(ctx context.Context, arg GetAnalyticsSummaryByTeamParams) (GetAnalyticsSummaryByTeamRow, error) {
+	row := q.db.QueryRow(ctx, GetAnalyticsSummaryByTeam, arg.TeamID, arg.RecordedAt, arg.RecordedAt_2)
+	var i GetAnalyticsSummaryByTeamRow
+	err := row.Scan(
+		&i.TotalPosts,
+		&i.TotalEvents,
+		&i.TotalImpressions,
+		&i.TotalEngagements,
+		&i.TotalClicks,
+	)
+	return i, err
+}
+
+const GetEventCountByType = `-- name: GetEventCountByType :many
+SELECT 
+    event_type,
+    COUNT(*) as event_count,
+    SUM(event_value) as total_value
+FROM analytics_events
+WHERE post_id = $1
+GROUP BY event_type
+ORDER BY total_value DESC
+`
+
+type GetEventCountByTypeRow struct {
+	EventType  EventType `db:"event_type" json:"event_type"`
+	EventCount int64     `db:"event_count" json:"event_count"`
+	TotalValue int64     `db:"total_value" json:"total_value"`
+}
+
+func (q *Queries) GetEventCountByType(ctx context.Context, postID uuid.UUID) ([]GetEventCountByTypeRow, error) {
+	rows, err := q.db.Query(ctx, GetEventCountByType, postID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetEventCountByTypeRow{}
+	for rows.Next() {
+		var i GetEventCountByTypeRow
+		if err := rows.Scan(&i.EventType, &i.EventCount, &i.TotalValue); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

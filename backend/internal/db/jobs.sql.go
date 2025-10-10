@@ -9,15 +9,15 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const CompleteJobRun = `-- name: CompleteJobRun :exec
 UPDATE job_runs
 SET 
     status = 'completed',
-    completed_at = NOW(),
-    duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
     result = $2,
+    completed_at = NOW(),
     updated_at = NOW()
 WHERE id = $1
 `
@@ -36,50 +36,41 @@ const CreateJobRun = `-- name: CreateJobRun :one
 
 INSERT INTO job_runs (
     job_name,
-    job_type,
     status,
-    context,
-    max_attempts
+    payload,
+    started_at
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4
 )
-RETURNING id, job_name, job_type, status, started_at, completed_at, duration_ms, worker_id, context, result, error_message, stack_trace, attempt_number, max_attempts, next_retry_at, created_at, updated_at
+RETURNING id, job_name, status, payload, result, error, started_at, completed_at, created_at, updated_at
 `
 
 type CreateJobRunParams struct {
-	JobName     string        `db:"job_name" json:"job_name"`
-	JobType     string        `db:"job_type" json:"job_type"`
-	Status      NullJobStatus `db:"status" json:"status"`
-	Context     []byte        `db:"context" json:"context"`
-	MaxAttempts *int32        `db:"max_attempts" json:"max_attempts"`
+	JobName   string             `db:"job_name" json:"job_name"`
+	Status    NullJobStatus      `db:"status" json:"status"`
+	Payload   []byte             `db:"payload" json:"payload"`
+	StartedAt pgtype.Timestamptz `db:"started_at" json:"started_at"`
 }
 
 // path: backend/sql/jobs.sql
+// 🔄 REFACTORED - Match actual job_runs schema
 func (q *Queries) CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error) {
 	row := q.db.QueryRow(ctx, CreateJobRun,
 		arg.JobName,
-		arg.JobType,
 		arg.Status,
-		arg.Context,
-		arg.MaxAttempts,
+		arg.Payload,
+		arg.StartedAt,
 	)
 	var i JobRun
 	err := row.Scan(
 		&i.ID,
 		&i.JobName,
-		&i.JobType,
 		&i.Status,
+		&i.Payload,
+		&i.Result,
+		&i.Error,
 		&i.StartedAt,
 		&i.CompletedAt,
-		&i.DurationMs,
-		&i.WorkerID,
-		&i.Context,
-		&i.Result,
-		&i.ErrorMessage,
-		&i.StackTrace,
-		&i.AttemptNumber,
-		&i.MaxAttempts,
-		&i.NextRetryAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -90,72 +81,60 @@ const FailJobRun = `-- name: FailJobRun :exec
 UPDATE job_runs
 SET 
     status = 'failed',
+    error = $2,
     completed_at = NOW(),
-    duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
-    error_message = $2,
-    stack_trace = $3,
-    attempt_number = attempt_number + 1,
-    next_retry_at = CASE 
-        WHEN attempt_number < max_attempts 
-        THEN NOW() + (INTERVAL '1 minute' * POWER(2, attempt_number))
-        ELSE NULL
-    END,
     updated_at = NOW()
 WHERE id = $1
 `
 
 type FailJobRunParams struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	ErrorMessage *string   `db:"error_message" json:"error_message"`
-	StackTrace   *string   `db:"stack_trace" json:"stack_trace"`
+	ID    uuid.UUID `db:"id" json:"id"`
+	Error *string   `db:"error" json:"error"`
 }
 
 func (q *Queries) FailJobRun(ctx context.Context, arg FailJobRunParams) error {
-	_, err := q.db.Exec(ctx, FailJobRun, arg.ID, arg.ErrorMessage, arg.StackTrace)
+	_, err := q.db.Exec(ctx, FailJobRun, arg.ID, arg.Error)
 	return err
 }
 
-const GetJobRun = `-- name: GetJobRun :one
-SELECT id, job_name, job_type, status, started_at, completed_at, duration_ms, worker_id, context, result, error_message, stack_trace, attempt_number, max_attempts, next_retry_at, created_at, updated_at FROM job_runs WHERE id = $1
+const GetJobRunByID = `-- name: GetJobRunByID :one
+SELECT id, job_name, status, payload, result, error, started_at, completed_at, created_at, updated_at FROM job_runs WHERE id = $1
 `
 
-func (q *Queries) GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error) {
-	row := q.db.QueryRow(ctx, GetJobRun, id)
+func (q *Queries) GetJobRunByID(ctx context.Context, id uuid.UUID) (JobRun, error) {
+	row := q.db.QueryRow(ctx, GetJobRunByID, id)
 	var i JobRun
 	err := row.Scan(
 		&i.ID,
 		&i.JobName,
-		&i.JobType,
 		&i.Status,
+		&i.Payload,
+		&i.Result,
+		&i.Error,
 		&i.StartedAt,
 		&i.CompletedAt,
-		&i.DurationMs,
-		&i.WorkerID,
-		&i.Context,
-		&i.Result,
-		&i.ErrorMessage,
-		&i.StackTrace,
-		&i.AttemptNumber,
-		&i.MaxAttempts,
-		&i.NextRetryAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const ListPendingRetries = `-- name: ListPendingRetries :many
-SELECT id, job_name, job_type, status, started_at, completed_at, duration_ms, worker_id, context, result, error_message, stack_trace, attempt_number, max_attempts, next_retry_at, created_at, updated_at FROM job_runs
+const ListFailedJobRuns = `-- name: ListFailedJobRuns :many
+SELECT id, job_name, status, payload, result, error, started_at, completed_at, created_at, updated_at
+FROM job_runs
 WHERE status = 'failed'
-  AND next_retry_at IS NOT NULL
-  AND next_retry_at <= NOW()
-  AND attempt_number < max_attempts
-ORDER BY next_retry_at ASC
-LIMIT $1
+  AND created_at >= $1
+ORDER BY created_at DESC
+LIMIT $2
 `
 
-func (q *Queries) ListPendingRetries(ctx context.Context, limit int32) ([]JobRun, error) {
-	rows, err := q.db.Query(ctx, ListPendingRetries, limit)
+type ListFailedJobRunsParams struct {
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	Limit     int32              `db:"limit" json:"limit"`
+}
+
+func (q *Queries) ListFailedJobRuns(ctx context.Context, arg ListFailedJobRunsParams) ([]JobRun, error) {
+	rows, err := q.db.Query(ctx, ListFailedJobRuns, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -166,19 +145,12 @@ func (q *Queries) ListPendingRetries(ctx context.Context, limit int32) ([]JobRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.JobName,
-			&i.JobType,
 			&i.Status,
+			&i.Payload,
+			&i.Result,
+			&i.Error,
 			&i.StartedAt,
 			&i.CompletedAt,
-			&i.DurationMs,
-			&i.WorkerID,
-			&i.Context,
-			&i.Result,
-			&i.ErrorMessage,
-			&i.StackTrace,
-			&i.AttemptNumber,
-			&i.MaxAttempts,
-			&i.NextRetryAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -193,7 +165,8 @@ func (q *Queries) ListPendingRetries(ctx context.Context, limit int32) ([]JobRun
 }
 
 const ListRecentJobRuns = `-- name: ListRecentJobRuns :many
-SELECT id, job_name, job_type, status, started_at, completed_at, duration_ms, worker_id, context, result, error_message, stack_trace, attempt_number, max_attempts, next_retry_at, created_at, updated_at FROM job_runs
+SELECT id, job_name, status, payload, result, error, started_at, completed_at, created_at, updated_at
+FROM job_runs
 WHERE job_name = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -216,19 +189,12 @@ func (q *Queries) ListRecentJobRuns(ctx context.Context, arg ListRecentJobRunsPa
 		if err := rows.Scan(
 			&i.ID,
 			&i.JobName,
-			&i.JobType,
 			&i.Status,
+			&i.Payload,
+			&i.Result,
+			&i.Error,
 			&i.StartedAt,
 			&i.CompletedAt,
-			&i.DurationMs,
-			&i.WorkerID,
-			&i.Context,
-			&i.Result,
-			&i.ErrorMessage,
-			&i.StackTrace,
-			&i.AttemptNumber,
-			&i.MaxAttempts,
-			&i.NextRetryAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -242,22 +208,20 @@ func (q *Queries) ListRecentJobRuns(ctx context.Context, arg ListRecentJobRunsPa
 	return items, nil
 }
 
-const StartJobRun = `-- name: StartJobRun :exec
+const UpdateJobRunStatus = `-- name: UpdateJobRunStatus :exec
 UPDATE job_runs
 SET 
-    status = 'running',
-    started_at = NOW(),
-    worker_id = $2,
+    status = $2,
     updated_at = NOW()
 WHERE id = $1
 `
 
-type StartJobRunParams struct {
-	ID       uuid.UUID `db:"id" json:"id"`
-	WorkerID *string   `db:"worker_id" json:"worker_id"`
+type UpdateJobRunStatusParams struct {
+	ID     uuid.UUID     `db:"id" json:"id"`
+	Status NullJobStatus `db:"status" json:"status"`
 }
 
-func (q *Queries) StartJobRun(ctx context.Context, arg StartJobRunParams) error {
-	_, err := q.db.Exec(ctx, StartJobRun, arg.ID, arg.WorkerID)
+func (q *Queries) UpdateJobRunStatus(ctx context.Context, arg UpdateJobRunStatusParams) error {
+	_, err := q.db.Exec(ctx, UpdateJobRunStatus, arg.ID, arg.Status)
 	return err
 }

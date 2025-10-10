@@ -13,9 +13,9 @@ import (
 )
 
 const CountScheduledPostsByTeam = `-- name: CountScheduledPostsByTeam :one
-SELECT COUNT(*) FROM scheduled_posts
+SELECT COUNT(*)
+FROM scheduled_posts
 WHERE team_id = $1 
-  AND status IN ('draft', 'scheduled', 'queued')
   AND deleted_at IS NULL
 `
 
@@ -34,13 +34,14 @@ INSERT INTO scheduled_posts (
     social_account_id,
     content,
     content_html,
+    shortened_links,
     status,
     scheduled_at,
     platform_specific_options
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, retry_count, error_message, created_at, updated_at, deleted_at
+RETURNING id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, error_message, retry_count, max_retries, created_at, updated_at, deleted_at
 `
 
 type CreateScheduledPostParams struct {
@@ -49,12 +50,14 @@ type CreateScheduledPostParams struct {
 	SocialAccountID         uuid.UUID          `db:"social_account_id" json:"social_account_id"`
 	Content                 string             `db:"content" json:"content"`
 	ContentHtml             *string            `db:"content_html" json:"content_html"`
+	ShortenedLinks          []byte             `db:"shortened_links" json:"shortened_links"`
 	Status                  NullPostStatus     `db:"status" json:"status"`
 	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
 	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
 }
 
 // path: backend/sql/scheduled_posts.sql
+// ✅ KEEP - Verify this file exists with these queries
 func (q *Queries) CreateScheduledPost(ctx context.Context, arg CreateScheduledPostParams) (ScheduledPost, error) {
 	row := q.db.QueryRow(ctx, CreateScheduledPost,
 		arg.TeamID,
@@ -62,6 +65,7 @@ func (q *Queries) CreateScheduledPost(ctx context.Context, arg CreateScheduledPo
 		arg.SocialAccountID,
 		arg.Content,
 		arg.ContentHtml,
+		arg.ShortenedLinks,
 		arg.Status,
 		arg.ScheduledAt,
 		arg.PlatformSpecificOptions,
@@ -79,8 +83,9 @@ func (q *Queries) CreateScheduledPost(ctx context.Context, arg CreateScheduledPo
 		&i.ScheduledAt,
 		&i.PublishedAt,
 		&i.PlatformSpecificOptions,
-		&i.RetryCount,
 		&i.ErrorMessage,
+		&i.RetryCount,
+		&i.MaxRetries,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -89,7 +94,7 @@ func (q *Queries) CreateScheduledPost(ctx context.Context, arg CreateScheduledPo
 }
 
 const GetDuePosts = `-- name: GetDuePosts :many
-SELECT sp.id, sp.team_id, sp.created_by, sp.social_account_id, sp.content, sp.content_html, sp.shortened_links, sp.status, sp.scheduled_at, sp.published_at, sp.platform_specific_options, sp.retry_count, sp.error_message, sp.created_at, sp.updated_at, sp.deleted_at, sa.platform
+SELECT sp.id, sp.team_id, sp.created_by, sp.social_account_id, sp.content, sp.content_html, sp.shortened_links, sp.status, sp.scheduled_at, sp.published_at, sp.platform_specific_options, sp.error_message, sp.retry_count, sp.max_retries, sp.created_at, sp.updated_at, sp.deleted_at, sa.platform
 FROM scheduled_posts sp
 INNER JOIN social_accounts sa ON sp.social_account_id = sa.id
 WHERE sp.status IN ('scheduled', 'queued')
@@ -118,8 +123,9 @@ type GetDuePostsRow struct {
 	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
 	PublishedAt             pgtype.Timestamptz `db:"published_at" json:"published_at"`
 	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
 	ErrorMessage            *string            `db:"error_message" json:"error_message"`
+	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
+	MaxRetries              *int32             `db:"max_retries" json:"max_retries"`
 	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DeletedAt               pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
@@ -147,8 +153,9 @@ func (q *Queries) GetDuePosts(ctx context.Context, arg GetDuePostsParams) ([]Get
 			&i.ScheduledAt,
 			&i.PublishedAt,
 			&i.PlatformSpecificOptions,
-			&i.RetryCount,
 			&i.ErrorMessage,
+			&i.RetryCount,
+			&i.MaxRetries,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
@@ -165,7 +172,7 @@ func (q *Queries) GetDuePosts(ctx context.Context, arg GetDuePostsParams) ([]Get
 }
 
 const GetScheduledPostByID = `-- name: GetScheduledPostByID :one
-SELECT id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, retry_count, error_message, created_at, updated_at, deleted_at FROM scheduled_posts
+SELECT id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, error_message, retry_count, max_retries, created_at, updated_at, deleted_at FROM scheduled_posts
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -184,8 +191,9 @@ func (q *Queries) GetScheduledPostByID(ctx context.Context, id uuid.UUID) (Sched
 		&i.ScheduledAt,
 		&i.PublishedAt,
 		&i.PlatformSpecificOptions,
-		&i.RetryCount,
 		&i.ErrorMessage,
+		&i.RetryCount,
+		&i.MaxRetries,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -193,81 +201,30 @@ func (q *Queries) GetScheduledPostByID(ctx context.Context, id uuid.UUID) (Sched
 	return i, err
 }
 
-const GetScheduledPostWithAccount = `-- name: GetScheduledPostWithAccount :one
-SELECT 
-    sp.id, sp.team_id, sp.created_by, sp.social_account_id, sp.content, sp.content_html, sp.shortened_links, sp.status, sp.scheduled_at, sp.published_at, sp.platform_specific_options, sp.retry_count, sp.error_message, sp.created_at, sp.updated_at, sp.deleted_at,
-    sa.platform,
-    sa.username,
-    sa.display_name
-FROM scheduled_posts sp
-INNER JOIN social_accounts sa ON sp.social_account_id = sa.id
-WHERE sp.id = $1 AND sp.deleted_at IS NULL
+const IncrementRetryCount = `-- name: IncrementRetryCount :exec
+UPDATE scheduled_posts
+SET 
+    retry_count = retry_count + 1,
+    error_message = $2,
+    updated_at = NOW()
+WHERE id = $1
 `
 
-type GetScheduledPostWithAccountRow struct {
-	ID                      uuid.UUID          `db:"id" json:"id"`
-	TeamID                  uuid.UUID          `db:"team_id" json:"team_id"`
-	CreatedBy               uuid.UUID          `db:"created_by" json:"created_by"`
-	SocialAccountID         uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	Content                 string             `db:"content" json:"content"`
-	ContentHtml             *string            `db:"content_html" json:"content_html"`
-	ShortenedLinks          []byte             `db:"shortened_links" json:"shortened_links"`
-	Status                  NullPostStatus     `db:"status" json:"status"`
-	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	PublishedAt             pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
-	ErrorMessage            *string            `db:"error_message" json:"error_message"`
-	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt               pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	Platform                SocialPlatform     `db:"platform" json:"platform"`
-	Username                *string            `db:"username" json:"username"`
-	DisplayName             *string            `db:"display_name" json:"display_name"`
+type IncrementRetryCountParams struct {
+	ID           uuid.UUID `db:"id" json:"id"`
+	ErrorMessage *string   `db:"error_message" json:"error_message"`
 }
 
-func (q *Queries) GetScheduledPostWithAccount(ctx context.Context, id uuid.UUID) (GetScheduledPostWithAccountRow, error) {
-	row := q.db.QueryRow(ctx, GetScheduledPostWithAccount, id)
-	var i GetScheduledPostWithAccountRow
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.CreatedBy,
-		&i.SocialAccountID,
-		&i.Content,
-		&i.ContentHtml,
-		&i.ShortenedLinks,
-		&i.Status,
-		&i.ScheduledAt,
-		&i.PublishedAt,
-		&i.PlatformSpecificOptions,
-		&i.RetryCount,
-		&i.ErrorMessage,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.Platform,
-		&i.Username,
-		&i.DisplayName,
-	)
-	return i, err
+func (q *Queries) IncrementRetryCount(ctx context.Context, arg IncrementRetryCountParams) error {
+	_, err := q.db.Exec(ctx, IncrementRetryCount, arg.ID, arg.ErrorMessage)
+	return err
 }
 
 const ListScheduledPostsByTeam = `-- name: ListScheduledPostsByTeam :many
-SELECT 
-    sp.id, sp.team_id, sp.created_by, sp.social_account_id, sp.content, sp.content_html, sp.shortened_links, sp.status, sp.scheduled_at, sp.published_at, sp.platform_specific_options, sp.retry_count, sp.error_message, sp.created_at, sp.updated_at, sp.deleted_at,
-    sa.platform,
-    sa.username,
-    u.full_name as creator_name
-FROM scheduled_posts sp
-INNER JOIN social_accounts sa ON sp.social_account_id = sa.id
-INNER JOIN users u ON sp.created_by = u.id
-WHERE sp.team_id = $1 
-  AND sp.deleted_at IS NULL
-ORDER BY 
-    CASE WHEN sp.scheduled_at IS NULL THEN 1 ELSE 0 END,
-    sp.scheduled_at ASC,
-    sp.created_at DESC
+SELECT id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, error_message, retry_count, max_retries, created_at, updated_at, deleted_at FROM scheduled_posts
+WHERE team_id = $1 
+  AND deleted_at IS NULL
+ORDER BY scheduled_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -277,37 +234,15 @@ type ListScheduledPostsByTeamParams struct {
 	Offset int32     `db:"offset" json:"offset"`
 }
 
-type ListScheduledPostsByTeamRow struct {
-	ID                      uuid.UUID          `db:"id" json:"id"`
-	TeamID                  uuid.UUID          `db:"team_id" json:"team_id"`
-	CreatedBy               uuid.UUID          `db:"created_by" json:"created_by"`
-	SocialAccountID         uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	Content                 string             `db:"content" json:"content"`
-	ContentHtml             *string            `db:"content_html" json:"content_html"`
-	ShortenedLinks          []byte             `db:"shortened_links" json:"shortened_links"`
-	Status                  NullPostStatus     `db:"status" json:"status"`
-	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	PublishedAt             pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
-	ErrorMessage            *string            `db:"error_message" json:"error_message"`
-	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt               pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	Platform                SocialPlatform     `db:"platform" json:"platform"`
-	Username                *string            `db:"username" json:"username"`
-	CreatorName             *string            `db:"creator_name" json:"creator_name"`
-}
-
-func (q *Queries) ListScheduledPostsByTeam(ctx context.Context, arg ListScheduledPostsByTeamParams) ([]ListScheduledPostsByTeamRow, error) {
+func (q *Queries) ListScheduledPostsByTeam(ctx context.Context, arg ListScheduledPostsByTeamParams) ([]ScheduledPost, error) {
 	rows, err := q.db.Query(ctx, ListScheduledPostsByTeam, arg.TeamID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListScheduledPostsByTeamRow{}
+	items := []ScheduledPost{}
 	for rows.Next() {
-		var i ListScheduledPostsByTeamRow
+		var i ScheduledPost
 		if err := rows.Scan(
 			&i.ID,
 			&i.TeamID,
@@ -320,14 +255,12 @@ func (q *Queries) ListScheduledPostsByTeam(ctx context.Context, arg ListSchedule
 			&i.ScheduledAt,
 			&i.PublishedAt,
 			&i.PlatformSpecificOptions,
-			&i.RetryCount,
 			&i.ErrorMessage,
+			&i.RetryCount,
+			&i.MaxRetries,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.Platform,
-			&i.Username,
-			&i.CreatorName,
 		); err != nil {
 			return nil, err
 		}
@@ -337,45 +270,6 @@ func (q *Queries) ListScheduledPostsByTeam(ctx context.Context, arg ListSchedule
 		return nil, err
 	}
 	return items, nil
-}
-
-const MarkPostFailed = `-- name: MarkPostFailed :exec
-UPDATE scheduled_posts
-SET 
-    status = 'failed',
-    error_message = $2,
-    retry_count = retry_count + 1,
-    updated_at = NOW()
-WHERE id = $1
-`
-
-type MarkPostFailedParams struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	ErrorMessage *string   `db:"error_message" json:"error_message"`
-}
-
-func (q *Queries) MarkPostFailed(ctx context.Context, arg MarkPostFailedParams) error {
-	_, err := q.db.Exec(ctx, MarkPostFailed, arg.ID, arg.ErrorMessage)
-	return err
-}
-
-const MarkPostPublished = `-- name: MarkPostPublished :exec
-UPDATE scheduled_posts
-SET 
-    status = 'published',
-    published_at = $2,
-    updated_at = NOW()
-WHERE id = $1
-`
-
-type MarkPostPublishedParams struct {
-	ID          uuid.UUID          `db:"id" json:"id"`
-	PublishedAt pgtype.Timestamptz `db:"published_at" json:"published_at"`
-}
-
-func (q *Queries) MarkPostPublished(ctx context.Context, arg MarkPostPublishedParams) error {
-	_, err := q.db.Exec(ctx, MarkPostPublished, arg.ID, arg.PublishedAt)
-	return err
 }
 
 const SoftDeleteScheduledPost = `-- name: SoftDeleteScheduledPost :exec
@@ -400,7 +294,7 @@ SET
     platform_specific_options = COALESCE($4, platform_specific_options),
     updated_at = NOW()
 WHERE id = $5 AND deleted_at IS NULL
-RETURNING id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, retry_count, error_message, created_at, updated_at, deleted_at
+RETURNING id, team_id, created_by, social_account_id, content, content_html, shortened_links, status, scheduled_at, published_at, platform_specific_options, error_message, retry_count, max_retries, created_at, updated_at, deleted_at
 `
 
 type UpdateScheduledPostParams struct {
@@ -432,8 +326,9 @@ func (q *Queries) UpdateScheduledPost(ctx context.Context, arg UpdateScheduledPo
 		&i.ScheduledAt,
 		&i.PublishedAt,
 		&i.PlatformSpecificOptions,
-		&i.RetryCount,
 		&i.ErrorMessage,
+		&i.RetryCount,
+		&i.MaxRetries,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -445,16 +340,28 @@ const UpdateScheduledPostStatus = `-- name: UpdateScheduledPostStatus :exec
 UPDATE scheduled_posts
 SET 
     status = $2,
+    error_message = COALESCE($3, error_message),
+    retry_count = COALESCE($4, retry_count),
+    published_at = COALESCE($5, published_at),
     updated_at = NOW()
 WHERE id = $1
 `
 
 type UpdateScheduledPostStatusParams struct {
-	ID     uuid.UUID      `db:"id" json:"id"`
-	Status NullPostStatus `db:"status" json:"status"`
+	ID           uuid.UUID          `db:"id" json:"id"`
+	Status       NullPostStatus     `db:"status" json:"status"`
+	ErrorMessage *string            `db:"error_message" json:"error_message"`
+	RetryCount   *int32             `db:"retry_count" json:"retry_count"`
+	PublishedAt  pgtype.Timestamptz `db:"published_at" json:"published_at"`
 }
 
 func (q *Queries) UpdateScheduledPostStatus(ctx context.Context, arg UpdateScheduledPostStatusParams) error {
-	_, err := q.db.Exec(ctx, UpdateScheduledPostStatus, arg.ID, arg.Status)
+	_, err := q.db.Exec(ctx, UpdateScheduledPostStatus,
+		arg.ID,
+		arg.Status,
+		arg.ErrorMessage,
+		arg.RetryCount,
+		arg.PublishedAt,
+	)
 	return err
 }

@@ -18,111 +18,154 @@ type Querier interface {
 	CancelSubscription(ctx context.Context, id uuid.UUID) error
 	CompleteJobRun(ctx context.Context, arg CompleteJobRunParams) error
 	CompleteQueueItem(ctx context.Context, id uuid.UUID) error
+	CountAttachmentsByPost(ctx context.Context, scheduledPostID uuid.UUID) (int64, error)
+	CountPostsByTeam(ctx context.Context, teamID uuid.UUID) (int64, error)
+	CountPostsByTeamAndDateRange(ctx context.Context, arg CountPostsByTeamAndDateRangeParams) (int64, error)
+	CountQueuedPostsByStatus(ctx context.Context, status NullQueueStatus) (int64, error)
 	CountScheduledPostsByTeam(ctx context.Context, teamID uuid.UUID) (int64, error)
+	CountSocialTokensByTeam(ctx context.Context, teamID uuid.UUID) (int64, error)
+	CountTeamMembers(ctx context.Context, teamID uuid.UUID) (int64, error)
+	CountUnpaidInvoices(ctx context.Context, teamID uuid.UUID) (int64, error)
+	CountWebhooksBySource(ctx context.Context, source WebhookSource) (int64, error)
+	// path: backend/sql/analytics.sql
+	// 🔄 REFACTORED - Match actual schema (recorded_at, no team_id, no event_timestamp)
+	CreateAnalyticsEvent(ctx context.Context, arg CreateAnalyticsEventParams) (AnalyticsEvent, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (TeamMembership, error)
 	// path: backend/sql/invoices.sql
+	// 🔄 REFACTORED - Use due_date, paid_at (no invoice_date, no invoice_pdf_url)
 	CreateInvoice(ctx context.Context, arg CreateInvoiceParams) (Invoice, error)
 	// path: backend/sql/jobs.sql
+	// 🔄 REFACTORED - Match actual job_runs schema
 	CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error)
+	// path: backend/sql/plans.sql
+	// 🔄 REFACTORED - Use price_monthly/yearly, stripe_price_id_monthly/yearly
+	CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, error)
 	// path: backend/sql/posts.sql
+	// 🔄 REFACTORED - Schema has impressions in analytics_events, not posts table
 	CreatePost(ctx context.Context, arg CreatePostParams) (Post, error)
 	// path: backend/sql/post_attachments.sql
+	// 🔄 REFACTORED - Match actual schema (url, upload_order, type)
 	CreatePostAttachment(ctx context.Context, arg CreatePostAttachmentParams) (PostAttachment, error)
+	// path: backend/sql/refresh_tokens.sql
+	// 🆕 NEW - JWT refresh token operations
+	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
+	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	// path: backend/sql/scheduled_posts.sql
+	// ✅ KEEP - Verify this file exists with these queries
 	CreateScheduledPost(ctx context.Context, arg CreateScheduledPostParams) (ScheduledPost, error)
+	// path: backend/sql/social_tokens.sql
+	// 🔄 REFACTORED - Fixed syntax and removed duplicates
+	CreateSocialToken(ctx context.Context, arg CreateSocialTokenParams) (SocialToken, error)
 	// path: backend/sql/subscriptions.sql
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
 	// path: backend/sql/teams.sql
+	// 🔄 REFACTORED - Removed duplicate team membership queries
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	// path: backend/sql/users.sql
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// path: backend/sql/webhooks.sql
+	// 🔄 REFACTORED - Match actual schema (webhooks_log table)
 	CreateWebhookLog(ctx context.Context, arg CreateWebhookLogParams) (WebhooksLog, error)
+	DeactivatePlan(ctx context.Context, id uuid.UUID) error
+	DeleteExpiredTokens(ctx context.Context) error
 	DeletePostAttachment(ctx context.Context, id uuid.UUID) error
 	DeletePostAttachmentsByScheduledPost(ctx context.Context, scheduledPostID uuid.UUID) error
+	DeleteRole(ctx context.Context, id uuid.UUID) error
+	DeleteSocialToken(ctx context.Context, socialAccountID uuid.UUID) error
 	// path: backend/sql/post_queue.sql
+	// 🔄 REFACTORED - Use max_attempts and error (not max_retries, error_message)
 	EnqueuePost(ctx context.Context, arg EnqueuePostParams) (PostQueue, error)
 	FailJobRun(ctx context.Context, arg FailJobRunParams) error
 	FailQueueItem(ctx context.Context, arg FailQueueItemParams) error
-	GetAnalyticsByPlatform(ctx context.Context, arg GetAnalyticsByPlatformParams) ([]GetAnalyticsByPlatformRow, error)
-	GetAnalyticsByPost(ctx context.Context, postID uuid.UUID) ([]GetAnalyticsByPostRow, error)
-	GetAnalyticsTimeSeries(ctx context.Context, arg GetAnalyticsTimeSeriesParams) ([]GetAnalyticsTimeSeriesRow, error)
+	GetAnalyticsEventsByDateRange(ctx context.Context, arg GetAnalyticsEventsByDateRangeParams) ([]AnalyticsEvent, error)
+	GetAnalyticsEventsByPost(ctx context.Context, postID uuid.UUID) ([]AnalyticsEvent, error)
+	GetAnalyticsSummaryByTeam(ctx context.Context, arg GetAnalyticsSummaryByTeamParams) (GetAnalyticsSummaryByTeamRow, error)
+	GetAttachmentsByType(ctx context.Context, arg GetAttachmentsByTypeParams) ([]PostAttachment, error)
 	GetDuePosts(ctx context.Context, arg GetDuePostsParams) ([]GetDuePostsRow, error)
+	GetEventCountByType(ctx context.Context, postID uuid.UUID) ([]GetEventCountByTypeRow, error)
+	GetExpiringSocialTokens(ctx context.Context) ([]GetExpiringSocialTokensRow, error)
 	GetInvoiceByID(ctx context.Context, id uuid.UUID) (Invoice, error)
-	GetInvoiceByStripeID(ctx context.Context, stripeInvoiceID *string) (Invoice, error)
-	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
-	// path: backend/sql/plans.sql
+	GetInvoiceByStripeID(ctx context.Context, stripeInvoiceID string) (Invoice, error)
+	GetJobRunByID(ctx context.Context, id uuid.UUID) (JobRun, error)
+	GetNextQueuedPosts(ctx context.Context, limit int32) ([]PostQueue, error)
 	GetPlanByID(ctx context.Context, id uuid.UUID) (Plan, error)
 	GetPlanBySlug(ctx context.Context, slug string) (Plan, error)
+	GetPlanByStripeMonthlyID(ctx context.Context, stripePriceIDMonthly *string) (Plan, error)
+	GetPlanByStripeYearlyID(ctx context.Context, stripePriceIDYearly *string) (Plan, error)
+	GetPostAttachmentByID(ctx context.Context, id uuid.UUID) (PostAttachment, error)
 	GetPostByID(ctx context.Context, id uuid.UUID) (Post, error)
 	GetPostByPlatformID(ctx context.Context, arg GetPostByPlatformIDParams) (Post, error)
-	GetPostByScheduledPostID(ctx context.Context, scheduledPostID uuid.UUID) (Post, error)
-	GetQueueItem(ctx context.Context, id uuid.UUID) (PostQueue, error)
+	GetPostByScheduledPostID(ctx context.Context, scheduledPostID pgtype.UUID) (Post, error)
+	GetQueueItemByID(ctx context.Context, id uuid.UUID) (PostQueue, error)
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	// path: backend/sql/roles.sql
+	// 🆕 NEW - Role management queries
 	GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error)
 	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetScheduledPostByID(ctx context.Context, id uuid.UUID) (ScheduledPost, error)
-	GetScheduledPostWithAccount(ctx context.Context, id uuid.UUID) (GetScheduledPostWithAccountRow, error)
 	GetSocialAccountByID(ctx context.Context, id uuid.UUID) (SocialAccount, error)
 	GetSocialAccountWithToken(ctx context.Context, id uuid.UUID) (GetSocialAccountWithTokenRow, error)
-	GetSocialToken(ctx context.Context, socialAccountID uuid.UUID) (SocialToken, error)
+	GetSocialTokenByAccountID(ctx context.Context, socialAccountID uuid.UUID) (SocialToken, error)
 	GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID *string) (Subscription, error)
 	GetSubscriptionByTeamID(ctx context.Context, teamID uuid.UUID) (GetSubscriptionByTeamIDRow, error)
-	GetTeamAnalyticsSummary(ctx context.Context, arg GetTeamAnalyticsSummaryParams) (GetTeamAnalyticsSummaryRow, error)
 	GetTeamByID(ctx context.Context, id uuid.UUID) (Team, error)
 	GetTeamBySlug(ctx context.Context, slug string) (Team, error)
 	GetTeamMembership(ctx context.Context, arg GetTeamMembershipParams) (GetTeamMembershipRow, error)
-	GetTopPerformingPosts(ctx context.Context, arg GetTopPerformingPostsParams) ([]GetTopPerformingPostsRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
-	GetWebhookLog(ctx context.Context, id uuid.UUID) (WebhooksLog, error)
-	IncrementPostMetric(ctx context.Context, arg IncrementPostMetricParams) error
-	// path: backend/sql/analytics.sql
-	InsertAnalyticsEvent(ctx context.Context, arg InsertAnalyticsEventParams) (AnalyticsEvent, error)
+	GetWebhookLogByID(ctx context.Context, id uuid.UUID) (WebhooksLog, error)
+	IncrementRetryCount(ctx context.Context, arg IncrementRetryCountParams) error
 	// path: backend/sql/social_accounts.sql
 	LinkSocialAccount(ctx context.Context, arg LinkSocialAccountParams) (SocialAccount, error)
 	ListActivePlans(ctx context.Context) ([]Plan, error)
+	ListAllPlans(ctx context.Context) ([]Plan, error)
 	ListExpiringSubscriptions(ctx context.Context, arg ListExpiringSubscriptionsParams) ([]ListExpiringSubscriptionsRow, error)
-	ListExpiringTokens(ctx context.Context, expiresAt pgtype.Timestamptz) ([]ListExpiringTokensRow, error)
+	ListFailedJobRuns(ctx context.Context, arg ListFailedJobRunsParams) ([]JobRun, error)
+	ListInvoicesBySubscription(ctx context.Context, subscriptionID uuid.UUID) ([]Invoice, error)
 	ListInvoicesByTeam(ctx context.Context, arg ListInvoicesByTeamParams) ([]Invoice, error)
-	ListPendingRetries(ctx context.Context, limit int32) ([]JobRun, error)
-	ListPostAttachments(ctx context.Context, scheduledPostID uuid.UUID) ([]PostAttachment, error)
+	ListPendingQueueItems(ctx context.Context, arg ListPendingQueueItemsParams) ([]ListPendingQueueItemsRow, error)
+	ListPostAttachmentsByScheduledPost(ctx context.Context, scheduledPostID uuid.UUID) ([]PostAttachment, error)
 	ListPostsByTeam(ctx context.Context, arg ListPostsByTeamParams) ([]ListPostsByTeamRow, error)
+	ListQueuedPostsByStatus(ctx context.Context, arg ListQueuedPostsByStatusParams) ([]PostQueue, error)
 	ListRecentJobRuns(ctx context.Context, arg ListRecentJobRunsParams) ([]JobRun, error)
+	ListRecentPostsByTeam(ctx context.Context, arg ListRecentPostsByTeamParams) ([]ListRecentPostsByTeamRow, error)
 	ListRoles(ctx context.Context) ([]Role, error)
-	ListScheduledPostsByTeam(ctx context.Context, arg ListScheduledPostsByTeamParams) ([]ListScheduledPostsByTeamRow, error)
+	ListScheduledPostsByTeam(ctx context.Context, arg ListScheduledPostsByTeamParams) ([]ScheduledPost, error)
 	ListSocialAccountsByPlatform(ctx context.Context, arg ListSocialAccountsByPlatformParams) ([]SocialAccount, error)
 	ListSocialAccountsByTeam(ctx context.Context, teamID uuid.UUID) ([]SocialAccount, error)
+	ListSystemRoles(ctx context.Context) ([]Role, error)
 	ListTeamMembers(ctx context.Context, teamID uuid.UUID) ([]ListTeamMembersRow, error)
 	ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]Team, error)
 	ListUnprocessedWebhooks(ctx context.Context, limit int32) ([]WebhooksLog, error)
-	LockNextQueueItems(ctx context.Context, arg LockNextQueueItemsParams) ([]PostQueue, error)
-	MarkPostFailed(ctx context.Context, arg MarkPostFailedParams) error
-	MarkPostPublished(ctx context.Context, arg MarkPostPublishedParams) error
+	ListWebhookLogs(ctx context.Context, arg ListWebhookLogsParams) ([]WebhooksLog, error)
+	LockQueueItem(ctx context.Context, id uuid.UUID) error
 	MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error
-	MarkWebhookFailed(ctx context.Context, arg MarkWebhookFailedParams) error
-	MarkWebhookProcessed(ctx context.Context, arg MarkWebhookProcessedParams) error
+	MarkWebhookProcessed(ctx context.Context, id uuid.UUID) error
 	RemoveMemberFromTeam(ctx context.Context, arg RemoveMemberFromTeamParams) error
-	ResetStaleLocks(ctx context.Context) error
+	RetryFailedQueueItem(ctx context.Context, id uuid.UUID) error
+	RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error
+	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	SoftDeleteScheduledPost(ctx context.Context, id uuid.UUID) error
 	SoftDeleteSocialAccount(ctx context.Context, id uuid.UUID) error
 	SoftDeleteTeam(ctx context.Context, id uuid.UUID) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
-	StartJobRun(ctx context.Context, arg StartJobRunParams) error
 	UpdateInvoiceStatus(ctx context.Context, arg UpdateInvoiceStatusParams) error
+	UpdateJobRunStatus(ctx context.Context, arg UpdateJobRunStatusParams) error
 	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (TeamMembership, error)
-	UpdatePostAnalytics(ctx context.Context, arg UpdatePostAnalyticsParams) error
+	UpdatePlan(ctx context.Context, arg UpdatePlanParams) (Plan, error)
+	UpdatePostAttachment(ctx context.Context, arg UpdatePostAttachmentParams) (PostAttachment, error)
+	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
 	UpdateScheduledPost(ctx context.Context, arg UpdateScheduledPostParams) (ScheduledPost, error)
 	UpdateScheduledPostStatus(ctx context.Context, arg UpdateScheduledPostStatusParams) error
 	UpdateSocialAccountMetadata(ctx context.Context, arg UpdateSocialAccountMetadataParams) error
 	UpdateSocialAccountStatus(ctx context.Context, arg UpdateSocialAccountStatusParams) error
+	UpdateSocialToken(ctx context.Context, arg UpdateSocialTokenParams) error
+	UpdateSocialTokens(ctx context.Context, arg UpdateSocialTokensParams) error
 	UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscriptionStatusParams) error
 	UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
-	// path: backend/sql/social_tokens.sql
-	UpsertSocialToken(ctx context.Context, arg UpsertSocialTokenParams) (SocialToken, error)
 }
 
 var _ Querier = (*Queries)(nil)

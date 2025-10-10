@@ -12,78 +12,75 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const CountUnpaidInvoices = `-- name: CountUnpaidInvoices :one
+SELECT COUNT(*)
+FROM invoices i
+INNER JOIN subscriptions s ON i.subscription_id = s.id
+WHERE s.team_id = $1
+  AND i.status IN ('open', 'past_due')
+`
+
+func (q *Queries) CountUnpaidInvoices(ctx context.Context, teamID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, CountUnpaidInvoices, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const CreateInvoice = `-- name: CreateInvoice :one
 
 INSERT INTO invoices (
     subscription_id,
-    team_id,
     stripe_invoice_id,
-    invoice_number,
-    status,
-    subtotal,
-    tax,
-    total,
     amount_due,
+    amount_paid,
     currency,
-    invoice_date,
-    due_date
+    status,
+    due_date,
+    paid_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, subscription_id, team_id, stripe_invoice_id, invoice_number, status, subtotal, tax, total, amount_paid, amount_due, currency, invoice_date, due_date, paid_at, invoice_pdf_url, hosted_invoice_url, metadata, created_at, updated_at
+RETURNING id, subscription_id, stripe_invoice_id, amount_due, amount_paid, currency, status, invoice_pdf, hosted_invoice_url, due_date, paid_at, created_at, updated_at
 `
 
 type CreateInvoiceParams struct {
 	SubscriptionID  uuid.UUID          `db:"subscription_id" json:"subscription_id"`
-	TeamID          uuid.UUID          `db:"team_id" json:"team_id"`
-	StripeInvoiceID *string            `db:"stripe_invoice_id" json:"stripe_invoice_id"`
-	InvoiceNumber   *string            `db:"invoice_number" json:"invoice_number"`
-	Status          NullInvoiceStatus  `db:"status" json:"status"`
-	Subtotal        int64              `db:"subtotal" json:"subtotal"`
-	Tax             *int64             `db:"tax" json:"tax"`
-	Total           int64              `db:"total" json:"total"`
-	AmountDue       int64              `db:"amount_due" json:"amount_due"`
+	StripeInvoiceID string             `db:"stripe_invoice_id" json:"stripe_invoice_id"`
+	AmountDue       pgtype.Numeric     `db:"amount_due" json:"amount_due"`
+	AmountPaid      pgtype.Numeric     `db:"amount_paid" json:"amount_paid"`
 	Currency        *string            `db:"currency" json:"currency"`
-	InvoiceDate     pgtype.Timestamptz `db:"invoice_date" json:"invoice_date"`
+	Status          NullInvoiceStatus  `db:"status" json:"status"`
 	DueDate         pgtype.Timestamptz `db:"due_date" json:"due_date"`
+	PaidAt          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
 }
 
 // path: backend/sql/invoices.sql
+// 🔄 REFACTORED - Use due_date, paid_at (no invoice_date, no invoice_pdf_url)
 func (q *Queries) CreateInvoice(ctx context.Context, arg CreateInvoiceParams) (Invoice, error) {
 	row := q.db.QueryRow(ctx, CreateInvoice,
 		arg.SubscriptionID,
-		arg.TeamID,
 		arg.StripeInvoiceID,
-		arg.InvoiceNumber,
-		arg.Status,
-		arg.Subtotal,
-		arg.Tax,
-		arg.Total,
 		arg.AmountDue,
+		arg.AmountPaid,
 		arg.Currency,
-		arg.InvoiceDate,
+		arg.Status,
 		arg.DueDate,
+		arg.PaidAt,
 	)
 	var i Invoice
 	err := row.Scan(
 		&i.ID,
 		&i.SubscriptionID,
-		&i.TeamID,
 		&i.StripeInvoiceID,
-		&i.InvoiceNumber,
-		&i.Status,
-		&i.Subtotal,
-		&i.Tax,
-		&i.Total,
-		&i.AmountPaid,
 		&i.AmountDue,
+		&i.AmountPaid,
 		&i.Currency,
-		&i.InvoiceDate,
+		&i.Status,
+		&i.InvoicePdf,
+		&i.HostedInvoiceUrl,
 		&i.DueDate,
 		&i.PaidAt,
-		&i.InvoicePdfUrl,
-		&i.HostedInvoiceUrl,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -91,7 +88,7 @@ func (q *Queries) CreateInvoice(ctx context.Context, arg CreateInvoiceParams) (I
 }
 
 const GetInvoiceByID = `-- name: GetInvoiceByID :one
-SELECT id, subscription_id, team_id, stripe_invoice_id, invoice_number, status, subtotal, tax, total, amount_paid, amount_due, currency, invoice_date, due_date, paid_at, invoice_pdf_url, hosted_invoice_url, metadata, created_at, updated_at FROM invoices WHERE id = $1
+SELECT id, subscription_id, stripe_invoice_id, amount_due, amount_paid, currency, status, invoice_pdf, hosted_invoice_url, due_date, paid_at, created_at, updated_at FROM invoices WHERE id = $1
 `
 
 func (q *Queries) GetInvoiceByID(ctx context.Context, id uuid.UUID) (Invoice, error) {
@@ -100,22 +97,15 @@ func (q *Queries) GetInvoiceByID(ctx context.Context, id uuid.UUID) (Invoice, er
 	err := row.Scan(
 		&i.ID,
 		&i.SubscriptionID,
-		&i.TeamID,
 		&i.StripeInvoiceID,
-		&i.InvoiceNumber,
-		&i.Status,
-		&i.Subtotal,
-		&i.Tax,
-		&i.Total,
-		&i.AmountPaid,
 		&i.AmountDue,
+		&i.AmountPaid,
 		&i.Currency,
-		&i.InvoiceDate,
+		&i.Status,
+		&i.InvoicePdf,
+		&i.HostedInvoiceUrl,
 		&i.DueDate,
 		&i.PaidAt,
-		&i.InvoicePdfUrl,
-		&i.HostedInvoiceUrl,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -123,41 +113,76 @@ func (q *Queries) GetInvoiceByID(ctx context.Context, id uuid.UUID) (Invoice, er
 }
 
 const GetInvoiceByStripeID = `-- name: GetInvoiceByStripeID :one
-SELECT id, subscription_id, team_id, stripe_invoice_id, invoice_number, status, subtotal, tax, total, amount_paid, amount_due, currency, invoice_date, due_date, paid_at, invoice_pdf_url, hosted_invoice_url, metadata, created_at, updated_at FROM invoices WHERE stripe_invoice_id = $1
+SELECT id, subscription_id, stripe_invoice_id, amount_due, amount_paid, currency, status, invoice_pdf, hosted_invoice_url, due_date, paid_at, created_at, updated_at FROM invoices WHERE stripe_invoice_id = $1
 `
 
-func (q *Queries) GetInvoiceByStripeID(ctx context.Context, stripeInvoiceID *string) (Invoice, error) {
+func (q *Queries) GetInvoiceByStripeID(ctx context.Context, stripeInvoiceID string) (Invoice, error) {
 	row := q.db.QueryRow(ctx, GetInvoiceByStripeID, stripeInvoiceID)
 	var i Invoice
 	err := row.Scan(
 		&i.ID,
 		&i.SubscriptionID,
-		&i.TeamID,
 		&i.StripeInvoiceID,
-		&i.InvoiceNumber,
-		&i.Status,
-		&i.Subtotal,
-		&i.Tax,
-		&i.Total,
-		&i.AmountPaid,
 		&i.AmountDue,
+		&i.AmountPaid,
 		&i.Currency,
-		&i.InvoiceDate,
+		&i.Status,
+		&i.InvoicePdf,
+		&i.HostedInvoiceUrl,
 		&i.DueDate,
 		&i.PaidAt,
-		&i.InvoicePdfUrl,
-		&i.HostedInvoiceUrl,
-		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const ListInvoicesBySubscription = `-- name: ListInvoicesBySubscription :many
+SELECT id, subscription_id, stripe_invoice_id, amount_due, amount_paid, currency, status, invoice_pdf, hosted_invoice_url, due_date, paid_at, created_at, updated_at FROM invoices
+WHERE subscription_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListInvoicesBySubscription(ctx context.Context, subscriptionID uuid.UUID) ([]Invoice, error) {
+	rows, err := q.db.Query(ctx, ListInvoicesBySubscription, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Invoice{}
+	for rows.Next() {
+		var i Invoice
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubscriptionID,
+			&i.StripeInvoiceID,
+			&i.AmountDue,
+			&i.AmountPaid,
+			&i.Currency,
+			&i.Status,
+			&i.InvoicePdf,
+			&i.HostedInvoiceUrl,
+			&i.DueDate,
+			&i.PaidAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const ListInvoicesByTeam = `-- name: ListInvoicesByTeam :many
-SELECT id, subscription_id, team_id, stripe_invoice_id, invoice_number, status, subtotal, tax, total, amount_paid, amount_due, currency, invoice_date, due_date, paid_at, invoice_pdf_url, hosted_invoice_url, metadata, created_at, updated_at FROM invoices
-WHERE team_id = $1
-ORDER BY invoice_date DESC
+SELECT i.id, i.subscription_id, i.stripe_invoice_id, i.amount_due, i.amount_paid, i.currency, i.status, i.invoice_pdf, i.hosted_invoice_url, i.due_date, i.paid_at, i.created_at, i.updated_at
+FROM invoices i
+INNER JOIN subscriptions s ON i.subscription_id = s.id
+WHERE s.team_id = $1
+ORDER BY i.created_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -179,22 +204,15 @@ func (q *Queries) ListInvoicesByTeam(ctx context.Context, arg ListInvoicesByTeam
 		if err := rows.Scan(
 			&i.ID,
 			&i.SubscriptionID,
-			&i.TeamID,
 			&i.StripeInvoiceID,
-			&i.InvoiceNumber,
-			&i.Status,
-			&i.Subtotal,
-			&i.Tax,
-			&i.Total,
-			&i.AmountPaid,
 			&i.AmountDue,
+			&i.AmountPaid,
 			&i.Currency,
-			&i.InvoiceDate,
+			&i.Status,
+			&i.InvoicePdf,
+			&i.HostedInvoiceUrl,
 			&i.DueDate,
 			&i.PaidAt,
-			&i.InvoicePdfUrl,
-			&i.HostedInvoiceUrl,
-			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -214,19 +232,15 @@ SET
     status = $2,
     amount_paid = COALESCE($3, amount_paid),
     paid_at = COALESCE($4, paid_at),
-    invoice_pdf_url = COALESCE($5, invoice_pdf_url),
-    hosted_invoice_url = COALESCE($6, hosted_invoice_url),
     updated_at = NOW()
 WHERE id = $1
 `
 
 type UpdateInvoiceStatusParams struct {
-	ID               uuid.UUID          `db:"id" json:"id"`
-	Status           NullInvoiceStatus  `db:"status" json:"status"`
-	AmountPaid       *int64             `db:"amount_paid" json:"amount_paid"`
-	PaidAt           pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
-	InvoicePdfUrl    *string            `db:"invoice_pdf_url" json:"invoice_pdf_url"`
-	HostedInvoiceUrl *string            `db:"hosted_invoice_url" json:"hosted_invoice_url"`
+	ID         uuid.UUID          `db:"id" json:"id"`
+	Status     NullInvoiceStatus  `db:"status" json:"status"`
+	AmountPaid pgtype.Numeric     `db:"amount_paid" json:"amount_paid"`
+	PaidAt     pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
 }
 
 func (q *Queries) UpdateInvoiceStatus(ctx context.Context, arg UpdateInvoiceStatusParams) error {
@@ -235,8 +249,6 @@ func (q *Queries) UpdateInvoiceStatus(ctx context.Context, arg UpdateInvoiceStat
 		arg.Status,
 		arg.AmountPaid,
 		arg.PaidAt,
-		arg.InvoicePdfUrl,
-		arg.HostedInvoiceUrl,
 	)
 	return err
 }

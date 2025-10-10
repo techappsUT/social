@@ -11,12 +11,55 @@ import (
 	"github.com/google/uuid"
 )
 
+const CreateRole = `-- name: CreateRole :one
+INSERT INTO roles (
+    name,
+    description,
+    permissions
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, name, description, permissions, is_system, created_at, updated_at
+`
+
+type CreateRoleParams struct {
+	Name        string  `db:"name" json:"name"`
+	Description *string `db:"description" json:"description"`
+	Permissions []byte  `db:"permissions" json:"permissions"`
+}
+
+func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error) {
+	row := q.db.QueryRow(ctx, CreateRole, arg.Name, arg.Description, arg.Permissions)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Permissions,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const DeleteRole = `-- name: DeleteRole :exec
+DELETE FROM roles
+WHERE id = $1 AND is_system = FALSE
+`
+
+func (q *Queries) DeleteRole(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, DeleteRole, id)
+	return err
+}
+
 const GetRoleByID = `-- name: GetRoleByID :one
 
 SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles WHERE id = $1
 `
 
 // path: backend/sql/roles.sql
+// 🆕 NEW - Role management queries
 func (q *Queries) GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error) {
 	row := q.db.QueryRow(ctx, GetRoleByID, id)
 	var i Role
@@ -52,7 +95,8 @@ func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) 
 }
 
 const ListRoles = `-- name: ListRoles :many
-SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles ORDER BY name ASC
+SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles
+ORDER BY name ASC
 `
 
 func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
@@ -81,4 +125,69 @@ func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const ListSystemRoles = `-- name: ListSystemRoles :many
+SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles
+WHERE is_system = TRUE
+ORDER BY name ASC
+`
+
+func (q *Queries) ListSystemRoles(ctx context.Context) ([]Role, error) {
+	rows, err := q.db.Query(ctx, ListSystemRoles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Role{}
+	for rows.Next() {
+		var i Role
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Permissions,
+			&i.IsSystem,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const UpdateRole = `-- name: UpdateRole :one
+UPDATE roles
+SET 
+    description = COALESCE($1, description),
+    permissions = COALESCE($2, permissions),
+    updated_at = NOW()
+WHERE id = $3 AND is_system = FALSE
+RETURNING id, name, description, permissions, is_system, created_at, updated_at
+`
+
+type UpdateRoleParams struct {
+	Description *string   `db:"description" json:"description"`
+	Permissions []byte    `db:"permissions" json:"permissions"`
+	ID          uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error) {
+	row := q.db.QueryRow(ctx, UpdateRole, arg.Description, arg.Permissions, arg.ID)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Permissions,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

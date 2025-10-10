@@ -11,6 +11,18 @@ import (
 	"github.com/google/uuid"
 )
 
+const CountAttachmentsByPost = `-- name: CountAttachmentsByPost :one
+SELECT COUNT(*) FROM post_attachments
+WHERE scheduled_post_id = $1
+`
+
+func (q *Queries) CountAttachmentsByPost(ctx context.Context, scheduledPostID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, CountAttachmentsByPost, scheduledPostID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const CreatePostAttachment = `-- name: CreatePostAttachment :one
 
 INSERT INTO post_attachments (
@@ -24,11 +36,11 @@ INSERT INTO post_attachments (
     height,
     duration,
     alt_text,
-    display_order
+    upload_order
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, display_order, upload_metadata, created_at
+RETURNING id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, upload_order, created_at
 `
 
 type CreatePostAttachmentParams struct {
@@ -42,10 +54,11 @@ type CreatePostAttachmentParams struct {
 	Height          *int32         `db:"height" json:"height"`
 	Duration        *int32         `db:"duration" json:"duration"`
 	AltText         *string        `db:"alt_text" json:"alt_text"`
-	DisplayOrder    *int32         `db:"display_order" json:"display_order"`
+	UploadOrder     *int32         `db:"upload_order" json:"upload_order"`
 }
 
 // path: backend/sql/post_attachments.sql
+// 🔄 REFACTORED - Match actual schema (url, upload_order, type)
 func (q *Queries) CreatePostAttachment(ctx context.Context, arg CreatePostAttachmentParams) (PostAttachment, error) {
 	row := q.db.QueryRow(ctx, CreatePostAttachment,
 		arg.ScheduledPostID,
@@ -58,7 +71,7 @@ func (q *Queries) CreatePostAttachment(ctx context.Context, arg CreatePostAttach
 		arg.Height,
 		arg.Duration,
 		arg.AltText,
-		arg.DisplayOrder,
+		arg.UploadOrder,
 	)
 	var i PostAttachment
 	err := row.Scan(
@@ -73,16 +86,14 @@ func (q *Queries) CreatePostAttachment(ctx context.Context, arg CreatePostAttach
 		&i.Height,
 		&i.Duration,
 		&i.AltText,
-		&i.DisplayOrder,
-		&i.UploadMetadata,
+		&i.UploadOrder,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const DeletePostAttachment = `-- name: DeletePostAttachment :exec
-DELETE FROM post_attachments
-WHERE id = $1
+DELETE FROM post_attachments WHERE id = $1
 `
 
 func (q *Queries) DeletePostAttachment(ctx context.Context, id uuid.UUID) error {
@@ -91,8 +102,7 @@ func (q *Queries) DeletePostAttachment(ctx context.Context, id uuid.UUID) error 
 }
 
 const DeletePostAttachmentsByScheduledPost = `-- name: DeletePostAttachmentsByScheduledPost :exec
-DELETE FROM post_attachments
-WHERE scheduled_post_id = $1
+DELETE FROM post_attachments WHERE scheduled_post_id = $1
 `
 
 func (q *Queries) DeletePostAttachmentsByScheduledPost(ctx context.Context, scheduledPostID uuid.UUID) error {
@@ -100,14 +110,19 @@ func (q *Queries) DeletePostAttachmentsByScheduledPost(ctx context.Context, sche
 	return err
 }
 
-const ListPostAttachments = `-- name: ListPostAttachments :many
-SELECT id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, display_order, upload_metadata, created_at FROM post_attachments
-WHERE scheduled_post_id = $1
-ORDER BY display_order ASC, created_at ASC
+const GetAttachmentsByType = `-- name: GetAttachmentsByType :many
+SELECT id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, upload_order, created_at FROM post_attachments
+WHERE scheduled_post_id = $1 AND type = $2
+ORDER BY upload_order ASC
 `
 
-func (q *Queries) ListPostAttachments(ctx context.Context, scheduledPostID uuid.UUID) ([]PostAttachment, error) {
-	rows, err := q.db.Query(ctx, ListPostAttachments, scheduledPostID)
+type GetAttachmentsByTypeParams struct {
+	ScheduledPostID uuid.UUID      `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Type            AttachmentType `db:"type" json:"type"`
+}
+
+func (q *Queries) GetAttachmentsByType(ctx context.Context, arg GetAttachmentsByTypeParams) ([]PostAttachment, error) {
+	rows, err := q.db.Query(ctx, GetAttachmentsByType, arg.ScheduledPostID, arg.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +142,7 @@ func (q *Queries) ListPostAttachments(ctx context.Context, scheduledPostID uuid.
 			&i.Height,
 			&i.Duration,
 			&i.AltText,
-			&i.DisplayOrder,
-			&i.UploadMetadata,
+			&i.UploadOrder,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -139,4 +153,121 @@ func (q *Queries) ListPostAttachments(ctx context.Context, scheduledPostID uuid.
 		return nil, err
 	}
 	return items, nil
+}
+
+const GetPostAttachmentByID = `-- name: GetPostAttachmentByID :one
+SELECT id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, upload_order, created_at FROM post_attachments WHERE id = $1
+`
+
+func (q *Queries) GetPostAttachmentByID(ctx context.Context, id uuid.UUID) (PostAttachment, error) {
+	row := q.db.QueryRow(ctx, GetPostAttachmentByID, id)
+	var i PostAttachment
+	err := row.Scan(
+		&i.ID,
+		&i.ScheduledPostID,
+		&i.Type,
+		&i.Url,
+		&i.ThumbnailUrl,
+		&i.FileSize,
+		&i.MimeType,
+		&i.Width,
+		&i.Height,
+		&i.Duration,
+		&i.AltText,
+		&i.UploadOrder,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const ListPostAttachmentsByScheduledPost = `-- name: ListPostAttachmentsByScheduledPost :many
+SELECT id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, upload_order, created_at FROM post_attachments
+WHERE scheduled_post_id = $1
+ORDER BY upload_order ASC, created_at ASC
+`
+
+func (q *Queries) ListPostAttachmentsByScheduledPost(ctx context.Context, scheduledPostID uuid.UUID) ([]PostAttachment, error) {
+	rows, err := q.db.Query(ctx, ListPostAttachmentsByScheduledPost, scheduledPostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PostAttachment{}
+	for rows.Next() {
+		var i PostAttachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScheduledPostID,
+			&i.Type,
+			&i.Url,
+			&i.ThumbnailUrl,
+			&i.FileSize,
+			&i.MimeType,
+			&i.Width,
+			&i.Height,
+			&i.Duration,
+			&i.AltText,
+			&i.UploadOrder,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const UpdatePostAttachment = `-- name: UpdatePostAttachment :one
+UPDATE post_attachments
+SET 
+    url = COALESCE($1, url),
+    thumbnail_url = COALESCE($2, thumbnail_url),
+    alt_text = COALESCE($3, alt_text),
+    width = COALESCE($4, width),
+    height = COALESCE($5, height),
+    upload_order = COALESCE($6, upload_order)
+WHERE id = $7
+RETURNING id, scheduled_post_id, type, url, thumbnail_url, file_size, mime_type, width, height, duration, alt_text, upload_order, created_at
+`
+
+type UpdatePostAttachmentParams struct {
+	Url          *string   `db:"url" json:"url"`
+	ThumbnailUrl *string   `db:"thumbnail_url" json:"thumbnail_url"`
+	AltText      *string   `db:"alt_text" json:"alt_text"`
+	Width        *int32    `db:"width" json:"width"`
+	Height       *int32    `db:"height" json:"height"`
+	UploadOrder  *int32    `db:"upload_order" json:"upload_order"`
+	ID           uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdatePostAttachment(ctx context.Context, arg UpdatePostAttachmentParams) (PostAttachment, error) {
+	row := q.db.QueryRow(ctx, UpdatePostAttachment,
+		arg.Url,
+		arg.ThumbnailUrl,
+		arg.AltText,
+		arg.Width,
+		arg.Height,
+		arg.UploadOrder,
+		arg.ID,
+	)
+	var i PostAttachment
+	err := row.Scan(
+		&i.ID,
+		&i.ScheduledPostID,
+		&i.Type,
+		&i.Url,
+		&i.ThumbnailUrl,
+		&i.FileSize,
+		&i.MimeType,
+		&i.Width,
+		&i.Height,
+		&i.Duration,
+		&i.AltText,
+		&i.UploadOrder,
+		&i.CreatedAt,
+	)
+	return i, err
 }

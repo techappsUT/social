@@ -85,7 +85,7 @@ func (s *Service) AuthenticateUser(ctx context.Context, identifier, password str
 	}
 
 	// Record login
-	user.RecordLogin()
+	user.RecordLogin("")
 	if err := s.repo.UpdateLastLogin(ctx, user.ID(), *user.LastLoginAt()); err != nil {
 		// Log error but don't fail authentication
 		// This is a non-critical operation

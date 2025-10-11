@@ -151,7 +151,8 @@ func (u *User) LastLoginAt() *time.Time { return u.lastLoginAt }
 func (u *User) CreatedAt() time.Time    { return u.createdAt }
 func (u *User) UpdatedAt() time.Time    { return u.updatedAt }
 func (u *User) DeletedAt() *time.Time   { return u.deletedAt }
-func (u *User) PasswordHash() string    { return u.passwordHash }
+
+// func (u *User) PasswordHash() string    { return u.passwordHash }
 
 // Business Logic Methods
 
@@ -244,11 +245,11 @@ func (u *User) VerifyEmail() error {
 }
 
 // RecordLogin updates the last login timestamp
-func (u *User) RecordLogin() {
-	now := time.Now().UTC()
-	u.lastLoginAt = &now
-	u.updatedAt = now
-}
+// func (u *User) RecordLogin() {
+// 	now := time.Now().UTC()
+// 	u.lastLoginAt = &now
+// 	u.updatedAt = now
+// }
 
 // Suspend suspends the user account
 func (u *User) Suspend() error {
@@ -415,3 +416,13 @@ func isValidRole(role Role) bool {
 		return false
 	}
 }
+
+// SetID sets the user ID (used by repository after creation)
+// func (u *User) SetID(id uuid.UUID) {
+// 	u.id = id
+// }
+
+// // PasswordHash returns the password hash
+// func (u *User) PasswordHash() string {
+// 	return u.passwordHash
+// }

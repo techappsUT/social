@@ -20,12 +20,20 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	// Legacy imports (keep for now)
 	"github.com/techappsUT/social-queue/internal/auth"
 	"github.com/techappsUT/social-queue/internal/handlers"
 	appMiddleware "github.com/techappsUT/social-queue/internal/middleware"
 	"github.com/techappsUT/social-queue/internal/social"
 	"github.com/techappsUT/social-queue/internal/social/adapters"
 	"github.com/techappsUT/social-queue/pkg/email"
+
+	// Clean Architecture imports
+	appAuth "github.com/techappsUT/social-queue/internal/application/auth"
+	appUser "github.com/techappsUT/social-queue/internal/application/user"
+	userDomain "github.com/techappsUT/social-queue/internal/domain/user"
+	"github.com/techappsUT/social-queue/internal/infrastructure/persistence"
+	"github.com/techappsUT/social-queue/internal/infrastructure/services"
 )
 
 // ============================================================================
@@ -39,15 +47,20 @@ type App struct {
 	DB    *gorm.DB
 	SqlDB *sql.DB
 
-	// Services
+	// Legacy Services
 	AuthService   *auth.Service
 	TokenService  *auth.TokenService
 	EmailService  email.Service
 	SocialService *social.Service
 
-	// Handlers
+	// Legacy Handlers
 	AuthHandler   *handlers.AuthHandler
 	SocialHandler *handlers.SocialHandler
+
+	// Clean Architecture Components
+	CreateUserUC  *appUser.CreateUserUseCase
+	LoginUC       *appAuth.LoginUseCase
+	AuthHandlerV2 *handlers.AuthHandlerV2
 
 	// Middleware
 	AuthMiddleware *appMiddleware.AuthMiddleware
@@ -93,22 +106,31 @@ func NewApp() (*App, error) {
 	}
 	log.Println("  ✓ Databases connected")
 
-	// Step 3: Initialize services
-	log.Println("⚙️  Initializing services...")
+	// Step 3: Initialize legacy services (keep for backward compatibility)
+	log.Println("⚙️  Initializing legacy services...")
 	app.initializeServices()
-	log.Println("  ✓ Services initialized")
+	log.Println("  ✓ Legacy services initialized")
 
-	// Step 4: Initialize handlers
+	// Step 4: Initialize Clean Architecture (NEW)
+	log.Println("🏗️  Initializing Clean Architecture...")
+	if err := app.initializeCleanArchitecture(); err != nil {
+		log.Printf("  ⚠️  Clean architecture init failed: %v", err)
+		// Don't fail - legacy still works
+	} else {
+		log.Println("  ✓ Clean Architecture initialized")
+	}
+
+	// Step 5: Initialize handlers
 	log.Println("🎯 Initializing handlers...")
 	app.initializeHandlers()
 	log.Println("  ✓ Handlers initialized")
 
-	// Step 5: Setup HTTP router
+	// Step 6: Setup HTTP router
 	log.Println("🌐 Setting up HTTP router...")
 	app.setupRouter()
 	log.Println("  ✓ Router configured")
 
-	// Step 6: Create HTTP server
+	// Step 7: Create HTTP server
 	app.setupServer()
 
 	log.Println("✅ Application initialized successfully")
@@ -116,18 +138,69 @@ func NewApp() (*App, error) {
 }
 
 // ============================================================================
+// CLEAN ARCHITECTURE INITIALIZATION (NEW)
+// ============================================================================
+
+func (app *App) initializeCleanArchitecture() error {
+	// Infrastructure Layer
+	userRepo := persistence.NewUserRepository(app.SqlDB)
+	userService := userDomain.NewService(userRepo)
+
+	// Infrastructure Services
+	tokenService := services.NewJWTTokenService(
+		app.Config.JWT.AccessSecret,
+		app.Config.JWT.RefreshSecret,
+	)
+
+	emailConfig := EmailConfig{
+		Provider:    app.Config.Email.Provider,
+		APIKey:      app.Config.Email.APIKey,
+		FromAddress: app.Config.Email.FromAddress,
+		FromName:    app.Config.Email.FromName,
+	}
+	emailService := services.NewEmailService(emailConfig)
+	cacheService := services.NewInMemoryCacheService()
+	logger := services.NewLogger()
+
+	// Application Layer (Use Cases)
+	app.CreateUserUC = appUser.NewCreateUserUseCase(
+		userRepo,
+		userService,
+		tokenService,
+		emailService,
+		logger,
+	)
+
+	app.LoginUC = appAuth.NewLoginUseCase(
+		userRepo,
+		userService,
+		tokenService,
+		cacheService,
+		logger,
+	)
+
+	// Presentation Layer (Handlers)
+	app.AuthHandlerV2 = handlers.NewAuthHandlerV2(
+		app.CreateUserUC,
+		app.LoginUC,
+	)
+
+	return nil
+}
+
+// ============================================================================
 // DATABASE SETUP
 // ============================================================================
 
 func (app *App) setupDatabases() error {
-	// GORM Connection (⚠️ LEGACY - for auth)
+	// GORM Connection (Legacy)
 	gormDB, err := app.setupGORM()
 	if err != nil {
 		return fmt.Errorf("GORM setup failed: %w", err)
 	}
 	app.DB = gormDB
 
-	// Standard SQL Connection (for future SQLC)
+	// Standard SQL Connection (for SQLC and Clean Architecture)
 	sqlDB, err := app.setupSQL()
 	if err != nil {
 		return fmt.Errorf("SQL setup failed: %w", err)
@@ -148,7 +221,6 @@ func (app *App) setupGORM() (*gorm.DB, error) {
 		app.Config.Database.SSLMode,
 	)
 
-	// Configure GORM logger
 	gormLogger := logger.Default
 	if app.Config.Environment == "production" {
 		gormLogger = logger.Default.LogMode(logger.Silent)
@@ -157,22 +229,15 @@ func (app *App) setupGORM() (*gorm.DB, error) {
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: gormLogger,
-		// 🔧 FIX: Disable auto-migration features that conflict with SQL migrations
+		Logger:                                   gormLogger,
 		DisableForeignKeyConstraintWhenMigrating: true,
-		// Don't create database if it doesn't exist
-		CreateBatchSize: 100,
+		CreateBatchSize:                          100,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 
-	// ❌ REMOVED: Auto-migrate - we use SQL migrations instead
-	// The schema is already managed by golang-migrate
-	// GORM will just use the existing tables
-
 	log.Println("  ℹ️  Using existing database schema (managed by migrations)")
-
 	return db, nil
 }
 
@@ -196,7 +261,6 @@ func (app *App) setupSQL() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
@@ -206,11 +270,11 @@ func (app *App) setupSQL() (*sql.DB, error) {
 }
 
 // ============================================================================
-// SERVICE INITIALIZATION
+// LEGACY SERVICE INITIALIZATION (Keep for backward compatibility)
 // ============================================================================
 
 func (app *App) initializeServices() {
-	// Auth Services (⚠️ LEGACY - GORM based)
+	// Auth Services (Legacy - GORM based)
 	app.TokenService = auth.NewTokenService(
 		app.Config.JWT.AccessSecret,
 		app.Config.JWT.RefreshSecret,
@@ -220,19 +284,17 @@ func (app *App) initializeServices() {
 	app.EmailService = email.NewMockEmailService(app.Config.BaseURL)
 	app.AuthService = auth.NewService(app.DB, app.TokenService, app.EmailService)
 
-	// Social Services (🆕 NEW - for Clean Architecture)
+	// Social Services
 	if app.Config.Security.EncryptionKey != "" {
 		encryption, err := social.NewTokenEncryption(app.Config.Security.EncryptionKey)
 		if err != nil {
 			log.Printf("⚠️  Failed to initialize encryption: %v", err)
-			log.Println("   Social media features will be disabled")
 			return
 		}
 
 		registry := app.setupSocialAdapters()
 		limiter := social.NewRateLimiter()
 
-		// TODO: Replace nil with SQLC queries in Phase 2
 		var queries social.DBQueries = nil
 		app.SocialService = social.NewService(registry, queries, encryption, limiter)
 
@@ -304,9 +366,12 @@ func (app *App) setupSocialAdapters() *social.AdapterRegistry {
 // ============================================================================
 
 func (app *App) initializeHandlers() {
+	// Legacy handlers
 	app.AuthHandler = handlers.NewAuthHandler(app.AuthService)
 	app.SocialHandler = handlers.NewSocialHandler(app.SocialService)
 	app.AuthMiddleware = appMiddleware.NewAuthMiddleware(app.TokenService)
+
+	// Clean Architecture handlers are initialized in initializeCleanArchitecture()
 }
 
 // ============================================================================
@@ -337,7 +402,7 @@ func (app *App) setupRouter() {
 	r.Get("/health", app.handleHealth)
 	r.Get("/", app.handleRoot)
 
-	// API routes
+	// API routes - Legacy (keep working)
 	r.Route("/api", func(r chi.Router) {
 		// Public routes
 		r.Group(func(r chi.Router) {
@@ -350,7 +415,7 @@ func (app *App) setupRouter() {
 
 			r.Get("/me", app.handleMe)
 
-			// Social routes (if service available)
+			// Social routes
 			if app.SocialService != nil {
 				r.Route("/social", func(r chi.Router) {
 					r.Get("/auth/{platform}/redirect", app.SocialHandler.InitiateOAuth)
@@ -365,6 +430,15 @@ func (app *App) setupRouter() {
 				r.Get("/admin/users", app.handleAdminUsers)
 			})
 		})
+	})
+
+	// API V2 routes - Clean Architecture (NEW)
+	r.Route("/api/v2", func(r chi.Router) {
+		if app.AuthHandlerV2 != nil {
+			app.AuthHandlerV2.RegisterRoutes(r)
+		}
+
+		// Add more V2 routes as you create more use cases
 	})
 
 	app.Router = r
@@ -398,84 +472,61 @@ func (app *App) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (app *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"message":"Admin users endpoint - TODO","users":[]}`))
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"users":[]}`))
 }
 
 // ============================================================================
-// SERVER SETUP & LIFECYCLE
+// SERVER LIFECYCLE
 // ============================================================================
 
 func (app *App) setupServer() {
 	app.Server = &http.Server{
-		Addr:           fmt.Sprintf(":%s", app.Config.Server.Port),
-		Handler:        app.Router,
-		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
-		IdleTimeout:    60 * time.Second,
-		MaxHeaderBytes: 1 << 20, // 1 MB
+		Addr:         ":" + app.Config.Server.Port,
+		Handler:      app.Router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 }
 
 func (app *App) Start() {
-	// Graceful shutdown setup
-	done := make(chan bool, 1)
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-
+	// Start server in goroutine
 	go func() {
-		<-quit
-		log.Println("\n🛑 Shutting down server...")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := app.Server.Shutdown(ctx); err != nil {
-			log.Printf("❌ Server forced to shutdown: %v", err)
+		log.Printf("📡 Server starting on port %s", app.Config.Server.Port)
+		if err := app.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("❌ Server failed to start: %v", err)
 		}
-
-		close(done)
 	}()
 
-	// Print startup info
-	app.printStartupInfo()
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-	// Start server
-	log.Printf("🚀 Server listening on http://localhost:%s", app.Config.Server.Port)
-	if err := app.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("❌ Server failed to start: %v", err)
+	log.Println("🛑 Shutting down server...")
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := app.Server.Shutdown(ctx); err != nil {
+		log.Fatalf("❌ Server forced to shutdown: %v", err)
 	}
 
-	<-done
-	log.Println("✅ Server stopped gracefully")
-}
-
-func (app *App) printStartupInfo() {
-	baseURL := fmt.Sprintf("http://localhost:%s", app.Config.Server.Port)
-
-	log.Println("")
-	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("  Environment: %s", app.Config.Environment)
-	log.Printf("  Base URL: %s", baseURL)
-	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Println("  📍 Endpoints:")
-	log.Printf("    • Health:  %s/health", baseURL)
-	log.Printf("    • Auth:    %s/api/auth/*", baseURL)
-	log.Printf("    • User:    %s/api/me", baseURL)
-
-	if app.SocialService != nil {
-		log.Printf("    • Social:  %s/api/social/*", baseURL)
-	}
-
-	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Println("")
+	log.Println("✅ Server gracefully stopped")
 }
 
 func (app *App) Cleanup() {
-	log.Println("🧹 Cleaning up resources...")
+	if app.DB != nil {
+		if sqlDB, err := app.DB.DB(); err == nil {
+			sqlDB.Close()
+		}
+	}
 
 	if app.SqlDB != nil {
 		app.SqlDB.Close()
 	}
 
-	log.Println("✅ Cleanup complete")
+	log.Println("🧹 Cleanup completed")
 }

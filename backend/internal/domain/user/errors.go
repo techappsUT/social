@@ -100,6 +100,8 @@ var (
 	// Generic errors
 	ErrInternal       = errors.New("internal error")
 	ErrNotImplemented = errors.New("not implemented")
+
+	ErrAccountSuspended = errors.New("account is suspended")
 )
 
 // ErrorCode represents a unique error code for API responses

@@ -37,5 +37,5 @@ A complete Buffer-like SaaS application for scheduling and managing social media
 
 ### 1. Clone and Setup
 ```bash
-git clone https://github.com/yourusername/socialqueue.git
+git clone https://github.com/techappsUT/social-queue.git
 cd socialqueue

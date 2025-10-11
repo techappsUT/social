@@ -12,26 +12,58 @@ import (
 	"github.com/google/uuid"
 )
 
+const CheckEmailExists = `-- name: CheckEmailExists :one
+SELECT EXISTS(
+    SELECT 1 FROM users 
+    WHERE email = $1 AND deleted_at IS NULL
+) AS exists
+`
+
+func (q *Queries) CheckEmailExists(ctx context.Context, email string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, CheckEmailExists, email)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const CheckUsernameExists = `-- name: CheckUsernameExists :one
+SELECT EXISTS(
+    SELECT 1 FROM users 
+    WHERE username = $1 AND deleted_at IS NULL
+) AS exists
+`
+
+func (q *Queries) CheckUsernameExists(ctx context.Context, username string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, CheckUsernameExists, username)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const CreateUser = `-- name: CreateUser :one
 
 INSERT INTO users (
     email,
     email_verified,
     password_hash,
-    full_name,
+    username,
+    first_name,
+    last_name,
     avatar_url,
     timezone
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, email, email_verified, password_hash, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at
+RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at
 `
 
 type CreateUserParams struct {
 	Email         string         `db:"email" json:"email"`
 	EmailVerified sql.NullBool   `db:"email_verified" json:"email_verified"`
 	PasswordHash  sql.NullString `db:"password_hash" json:"password_hash"`
-	FullName      sql.NullString `db:"full_name" json:"full_name"`
+	Username      string         `db:"username" json:"username"`
+	FirstName     string         `db:"first_name" json:"first_name"`
+	LastName      string         `db:"last_name" json:"last_name"`
 	AvatarUrl     sql.NullString `db:"avatar_url" json:"avatar_url"`
 	Timezone      sql.NullString `db:"timezone" json:"timezone"`
 }
@@ -42,7 +74,9 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.Email,
 		arg.EmailVerified,
 		arg.PasswordHash,
-		arg.FullName,
+		arg.Username,
+		arg.FirstName,
+		arg.LastName,
 		arg.AvatarUrl,
 		arg.Timezone,
 	)
@@ -52,6 +86,9 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Email,
 		&i.EmailVerified,
 		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
 		&i.FullName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -66,7 +103,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const GetUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, email_verified, password_hash, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -78,6 +115,9 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.EmailVerified,
 		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
 		&i.FullName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -92,7 +132,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const GetUserByID = `-- name: GetUserByID :one
-SELECT id, email, email_verified, password_hash, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -104,6 +144,38 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.Email,
 		&i.EmailVerified,
 		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
+		&i.FullName,
+		&i.AvatarUrl,
+		&i.Timezone,
+		&i.Locale,
+		&i.IsActive,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const GetUserByUsername = `-- name: GetUserByUsername :one
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
+WHERE username = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	row := q.db.QueryRowContext(ctx, GetUserByUsername, username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
 		&i.FullName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -175,16 +247,20 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 const UpdateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
 SET 
-    full_name = COALESCE($1, full_name),
-    avatar_url = COALESCE($2, avatar_url),
-    timezone = COALESCE($3, timezone),
+    username = COALESCE($1, username),
+    first_name = COALESCE($2, first_name),
+    last_name = COALESCE($3, last_name),
+    avatar_url = COALESCE($4, avatar_url),
+    timezone = COALESCE($5, timezone),
     updated_at = NOW()
-WHERE id = $4 AND deleted_at IS NULL
-RETURNING id, email, email_verified, password_hash, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at
+WHERE id = $6 AND deleted_at IS NULL
+RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at
 `
 
 type UpdateUserProfileParams struct {
-	FullName  sql.NullString `db:"full_name" json:"full_name"`
+	Username  sql.NullString `db:"username" json:"username"`
+	FirstName sql.NullString `db:"first_name" json:"first_name"`
+	LastName  sql.NullString `db:"last_name" json:"last_name"`
 	AvatarUrl sql.NullString `db:"avatar_url" json:"avatar_url"`
 	Timezone  sql.NullString `db:"timezone" json:"timezone"`
 	ID        uuid.UUID      `db:"id" json:"id"`
@@ -192,7 +268,9 @@ type UpdateUserProfileParams struct {
 
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, UpdateUserProfile,
-		arg.FullName,
+		arg.Username,
+		arg.FirstName,
+		arg.LastName,
 		arg.AvatarUrl,
 		arg.Timezone,
 		arg.ID,
@@ -203,6 +281,9 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.Email,
 		&i.EmailVerified,
 		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
 		&i.FullName,
 		&i.AvatarUrl,
 		&i.Timezone,

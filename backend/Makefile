@@ -139,10 +139,22 @@ tidy: ## Tidy go modules
 	$(GOMOD) tidy
 	@echo "$(GREEN)✓ Modules tidied$(NC)"
 
-##@ Quick Actions
+# ##@ Quick Actions
 
-fresh-start: docker-down docker-clean docker-up migrate-up run ## Fresh start (clean + migrate + run)
+# fresh-start: docker-down docker-clean docker-up migrate-up run ## Fresh start (clean + migrate + run)
 
-reset-db: docker-down docker-clean docker-up migrate-up ## Reset database
+# reset-db: docker-down docker-clean docker-up migrate-up ## Reset database
 
-quick-test: tidy test ## Tidy and test
+# quick-test: tidy test ## Tidy and test
+
+# cd /mnt/e/upwork/social-queue/backend
+
+# # Drop database (remove -it flag for non-interactive)
+# docker exec socialqueue-postgres psql -U socialqueue -d postgres -c "DROP DATABASE IF EXISTS socialqueue_dev;"
+
+# # Create fresh database
+# docker exec socialqueue-postgres psql -U socialqueue -d postgres -c "CREATE DATABASE socialqueue_dev;"
+
+# # Verify it's empty
+# docker exec -it socialqueue-postgres psql -U socialqueue -d socialqueue_dev -c "\dt"
+# # Should show: "Did not find any relations"

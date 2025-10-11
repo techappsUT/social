@@ -989,15 +989,22 @@ type User struct {
 	Email         string         `db:"email" json:"email"`
 	EmailVerified sql.NullBool   `db:"email_verified" json:"email_verified"`
 	PasswordHash  sql.NullString `db:"password_hash" json:"password_hash"`
-	FullName      sql.NullString `db:"full_name" json:"full_name"`
-	AvatarUrl     sql.NullString `db:"avatar_url" json:"avatar_url"`
-	Timezone      sql.NullString `db:"timezone" json:"timezone"`
-	Locale        sql.NullString `db:"locale" json:"locale"`
-	IsActive      sql.NullBool   `db:"is_active" json:"is_active"`
-	LastLoginAt   sql.NullTime   `db:"last_login_at" json:"last_login_at"`
-	CreatedAt     sql.NullTime   `db:"created_at" json:"created_at"`
-	UpdatedAt     sql.NullTime   `db:"updated_at" json:"updated_at"`
-	DeletedAt     sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+	// Unique username for user identification (3-30 chars, lowercase alphanumeric with _ and -)
+	Username string `db:"username" json:"username"`
+	// User first name (required)
+	FirstName string `db:"first_name" json:"first_name"`
+	// User last name (optional but recommended)
+	LastName string `db:"last_name" json:"last_name"`
+	// DEPRECATED: Use first_name and last_name instead
+	FullName    sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl   sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone    sql.NullString `db:"timezone" json:"timezone"`
+	Locale      sql.NullString `db:"locale" json:"locale"`
+	IsActive    sql.NullBool   `db:"is_active" json:"is_active"`
+	LastLoginAt sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt   sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt   sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt   sql.NullTime   `db:"deleted_at" json:"deleted_at"`
 }
 
 // Webhook event log

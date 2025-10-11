@@ -5,11 +5,13 @@ INSERT INTO users (
     email,
     email_verified,
     password_hash,
-    full_name,
+    username,
+    first_name,
+    last_name,
     avatar_url,
     timezone
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 
@@ -21,10 +23,16 @@ WHERE id = $1 AND deleted_at IS NULL;
 SELECT * FROM users
 WHERE email = $1 AND deleted_at IS NULL;
 
+-- name: GetUserByUsername :one
+SELECT * FROM users
+WHERE username = $1 AND deleted_at IS NULL;
+
 -- name: UpdateUserProfile :one
 UPDATE users
 SET 
-    full_name = COALESCE(sqlc.narg('full_name'), full_name),
+    username = COALESCE(sqlc.narg('username'), username),
+    first_name = COALESCE(sqlc.narg('first_name'), first_name),
+    last_name = COALESCE(sqlc.narg('last_name'), last_name),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     timezone = COALESCE(sqlc.narg('timezone'), timezone),
     updated_at = NOW()
@@ -56,3 +64,15 @@ SET
     deleted_at = NOW(),
     updated_at = NOW()
 WHERE id = $1;
+
+-- name: CheckUsernameExists :one
+SELECT EXISTS(
+    SELECT 1 FROM users 
+    WHERE username = $1 AND deleted_at IS NULL
+) AS exists;
+
+-- name: CheckEmailExists :one
+SELECT EXISTS(
+    SELECT 1 FROM users 
+    WHERE email = $1 AND deleted_at IS NULL
+) AS exists;

@@ -31,7 +31,10 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     email_verified BOOLEAN DEFAULT FALSE,
     password_hash VARCHAR(255), -- nullable for OAuth-only users
-    full_name VARCHAR(255),
+    username VARCHAR(30) UNIQUE NOT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    full_name VARCHAR(255), -- deprecated, for backward compatibility
     avatar_url TEXT,
     timezone VARCHAR(50) DEFAULT 'UTC',
     locale VARCHAR(10) DEFAULT 'en',
@@ -43,10 +46,21 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_username ON users(username) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_deleted_at ON users(deleted_at) WHERE deleted_at IS NOT NULL;
+
+-- Add check constraint for username format
+ALTER TABLE users ADD CONSTRAINT users_username_format 
+    CHECK (username ~ '^[a-z0-9_-]{3,30}$');
 
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Comments
+COMMENT ON COLUMN users.username IS 'Unique username for user identification (3-30 chars, lowercase alphanumeric with _ and -)';
+COMMENT ON COLUMN users.first_name IS 'User first name (required)';
+COMMENT ON COLUMN users.last_name IS 'User last name (optional but recommended)';
+COMMENT ON COLUMN users.full_name IS 'DEPRECATED: Use first_name and last_name instead';
 
 
 -- ============================================================================
@@ -398,9 +412,9 @@ CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans
 
 -- Insert default plans
 INSERT INTO plans (name, slug, description, price_monthly, price_yearly, features, limits, is_active) VALUES
-    ('Free', 'free', 'Perfect for getting started', 0.00, 0.00, 
+    ('Free', 'free', 'Perfect for getting started', 0.00, 0.00,
      '["3 social accounts", "10 scheduled posts", "Basic analytics"]'::jsonb,
-     '{"social_accounts": 3, "scheduled_posts": 10, "team_members": 1}'::jsonb, 
+     '{"social_accounts": 3, "scheduled_posts": 10, "team_members": 1}'::jsonb,
      TRUE),
     ('Pro', 'pro', 'For growing businesses', 19.99, 199.00,
      '["Unlimited accounts", "Unlimited posts", "Advanced analytics", "Team collaboration"]'::jsonb,

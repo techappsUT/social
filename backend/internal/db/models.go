@@ -5,13 +5,14 @@
 package db
 
 import (
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type AttachmentType string
@@ -753,151 +754,151 @@ func AllWebhookSourceValues() []WebhookSource {
 
 // Social media engagement events
 type AnalyticsEvent struct {
-	ID            uuid.UUID          `db:"id" json:"id"`
-	PostID        uuid.UUID          `db:"post_id" json:"post_id"`
-	EventType     EventType          `db:"event_type" json:"event_type"`
-	EventValue    *int32             `db:"event_value" json:"event_value"`
-	EventMetadata []byte             `db:"event_metadata" json:"event_metadata"`
-	RecordedAt    pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
+	ID            uuid.UUID             `db:"id" json:"id"`
+	PostID        uuid.UUID             `db:"post_id" json:"post_id"`
+	EventType     EventType             `db:"event_type" json:"event_type"`
+	EventValue    sql.NullInt32         `db:"event_value" json:"event_value"`
+	EventMetadata pqtype.NullRawMessage `db:"event_metadata" json:"event_metadata"`
+	RecordedAt    sql.NullTime          `db:"recorded_at" json:"recorded_at"`
 }
 
 // Billing invoices
 type Invoice struct {
-	ID               uuid.UUID          `db:"id" json:"id"`
-	SubscriptionID   uuid.UUID          `db:"subscription_id" json:"subscription_id"`
-	StripeInvoiceID  string             `db:"stripe_invoice_id" json:"stripe_invoice_id"`
-	AmountDue        pgtype.Numeric     `db:"amount_due" json:"amount_due"`
-	AmountPaid       pgtype.Numeric     `db:"amount_paid" json:"amount_paid"`
-	Currency         *string            `db:"currency" json:"currency"`
-	Status           NullInvoiceStatus  `db:"status" json:"status"`
-	InvoicePdf       *string            `db:"invoice_pdf" json:"invoice_pdf"`
-	HostedInvoiceUrl *string            `db:"hosted_invoice_url" json:"hosted_invoice_url"`
-	DueDate          pgtype.Timestamptz `db:"due_date" json:"due_date"`
-	PaidAt           pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
-	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID               uuid.UUID         `db:"id" json:"id"`
+	SubscriptionID   uuid.UUID         `db:"subscription_id" json:"subscription_id"`
+	StripeInvoiceID  string            `db:"stripe_invoice_id" json:"stripe_invoice_id"`
+	AmountDue        string            `db:"amount_due" json:"amount_due"`
+	AmountPaid       sql.NullString    `db:"amount_paid" json:"amount_paid"`
+	Currency         sql.NullString    `db:"currency" json:"currency"`
+	Status           NullInvoiceStatus `db:"status" json:"status"`
+	InvoicePdf       sql.NullString    `db:"invoice_pdf" json:"invoice_pdf"`
+	HostedInvoiceUrl sql.NullString    `db:"hosted_invoice_url" json:"hosted_invoice_url"`
+	DueDate          sql.NullTime      `db:"due_date" json:"due_date"`
+	PaidAt           sql.NullTime      `db:"paid_at" json:"paid_at"`
+	CreatedAt        sql.NullTime      `db:"created_at" json:"created_at"`
+	UpdatedAt        sql.NullTime      `db:"updated_at" json:"updated_at"`
 }
 
 // Background job execution log
 type JobRun struct {
-	ID          uuid.UUID          `db:"id" json:"id"`
-	JobName     string             `db:"job_name" json:"job_name"`
-	Status      NullJobStatus      `db:"status" json:"status"`
-	Payload     []byte             `db:"payload" json:"payload"`
-	Result      []byte             `db:"result" json:"result"`
-	Error       *string            `db:"error" json:"error"`
-	StartedAt   pgtype.Timestamptz `db:"started_at" json:"started_at"`
-	CompletedAt pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
-	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID          uuid.UUID             `db:"id" json:"id"`
+	JobName     string                `db:"job_name" json:"job_name"`
+	Status      NullJobStatus         `db:"status" json:"status"`
+	Payload     pqtype.NullRawMessage `db:"payload" json:"payload"`
+	Result      pqtype.NullRawMessage `db:"result" json:"result"`
+	Error       sql.NullString        `db:"error" json:"error"`
+	StartedAt   sql.NullTime          `db:"started_at" json:"started_at"`
+	CompletedAt sql.NullTime          `db:"completed_at" json:"completed_at"`
+	CreatedAt   sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt   sql.NullTime          `db:"updated_at" json:"updated_at"`
 }
 
 // Subscription plans
 type Plan struct {
-	ID                   uuid.UUID          `db:"id" json:"id"`
-	Name                 string             `db:"name" json:"name"`
-	Slug                 string             `db:"slug" json:"slug"`
-	Description          *string            `db:"description" json:"description"`
-	PriceMonthly         pgtype.Numeric     `db:"price_monthly" json:"price_monthly"`
-	PriceYearly          pgtype.Numeric     `db:"price_yearly" json:"price_yearly"`
-	Features             []byte             `db:"features" json:"features"`
-	Limits               []byte             `db:"limits" json:"limits"`
-	IsActive             *bool              `db:"is_active" json:"is_active"`
-	StripePriceIDMonthly *string            `db:"stripe_price_id_monthly" json:"stripe_price_id_monthly"`
-	StripePriceIDYearly  *string            `db:"stripe_price_id_yearly" json:"stripe_price_id_yearly"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID                   uuid.UUID             `db:"id" json:"id"`
+	Name                 string                `db:"name" json:"name"`
+	Slug                 string                `db:"slug" json:"slug"`
+	Description          sql.NullString        `db:"description" json:"description"`
+	PriceMonthly         string                `db:"price_monthly" json:"price_monthly"`
+	PriceYearly          string                `db:"price_yearly" json:"price_yearly"`
+	Features             pqtype.NullRawMessage `db:"features" json:"features"`
+	Limits               pqtype.NullRawMessage `db:"limits" json:"limits"`
+	IsActive             sql.NullBool          `db:"is_active" json:"is_active"`
+	StripePriceIDMonthly sql.NullString        `db:"stripe_price_id_monthly" json:"stripe_price_id_monthly"`
+	StripePriceIDYearly  sql.NullString        `db:"stripe_price_id_yearly" json:"stripe_price_id_yearly"`
+	CreatedAt            sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime          `db:"updated_at" json:"updated_at"`
 }
 
 // Archive of published posts
 type Post struct {
-	ID                 uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID    pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID             uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID    uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID     *string            `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl    *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content            string             `db:"content" json:"content"`
-	PublishedAt        pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	Metrics            []byte             `db:"metrics" json:"metrics"`
-	LastMetricsFetchAt pgtype.Timestamptz `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
-	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID                 uuid.UUID             `db:"id" json:"id"`
+	ScheduledPostID    uuid.NullUUID         `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID             uuid.UUID             `db:"team_id" json:"team_id"`
+	SocialAccountID    uuid.UUID             `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID     sql.NullString        `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl    sql.NullString        `db:"platform_post_url" json:"platform_post_url"`
+	Content            string                `db:"content" json:"content"`
+	PublishedAt        sql.NullTime          `db:"published_at" json:"published_at"`
+	Metrics            pqtype.NullRawMessage `db:"metrics" json:"metrics"`
+	LastMetricsFetchAt sql.NullTime          `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
+	CreatedAt          sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt          sql.NullTime          `db:"updated_at" json:"updated_at"`
 }
 
 // Media attachments for posts
 type PostAttachment struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
-	Type            AttachmentType     `db:"type" json:"type"`
-	Url             string             `db:"url" json:"url"`
-	ThumbnailUrl    *string            `db:"thumbnail_url" json:"thumbnail_url"`
-	FileSize        *int64             `db:"file_size" json:"file_size"`
-	MimeType        *string            `db:"mime_type" json:"mime_type"`
-	Width           *int32             `db:"width" json:"width"`
-	Height          *int32             `db:"height" json:"height"`
-	Duration        *int32             `db:"duration" json:"duration"`
-	AltText         *string            `db:"alt_text" json:"alt_text"`
-	UploadOrder     *int32             `db:"upload_order" json:"upload_order"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID              uuid.UUID      `db:"id" json:"id"`
+	ScheduledPostID uuid.UUID      `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Type            AttachmentType `db:"type" json:"type"`
+	Url             string         `db:"url" json:"url"`
+	ThumbnailUrl    sql.NullString `db:"thumbnail_url" json:"thumbnail_url"`
+	FileSize        sql.NullInt64  `db:"file_size" json:"file_size"`
+	MimeType        sql.NullString `db:"mime_type" json:"mime_type"`
+	Width           sql.NullInt32  `db:"width" json:"width"`
+	Height          sql.NullInt32  `db:"height" json:"height"`
+	Duration        sql.NullInt32  `db:"duration" json:"duration"`
+	AltText         sql.NullString `db:"alt_text" json:"alt_text"`
+	UploadOrder     sql.NullInt32  `db:"upload_order" json:"upload_order"`
+	CreatedAt       sql.NullTime   `db:"created_at" json:"created_at"`
 }
 
 // Background job queue for post publishing
 type PostQueue struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
-	Status          NullQueueStatus    `db:"status" json:"status"`
-	Priority        *int32             `db:"priority" json:"priority"`
-	Attempts        *int32             `db:"attempts" json:"attempts"`
-	MaxAttempts     *int32             `db:"max_attempts" json:"max_attempts"`
-	Error           *string            `db:"error" json:"error"`
-	ScheduledFor    time.Time          `db:"scheduled_for" json:"scheduled_for"`
-	StartedAt       pgtype.Timestamptz `db:"started_at" json:"started_at"`
-	CompletedAt     pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID              uuid.UUID       `db:"id" json:"id"`
+	ScheduledPostID uuid.UUID       `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Status          NullQueueStatus `db:"status" json:"status"`
+	Priority        sql.NullInt32   `db:"priority" json:"priority"`
+	Attempts        sql.NullInt32   `db:"attempts" json:"attempts"`
+	MaxAttempts     sql.NullInt32   `db:"max_attempts" json:"max_attempts"`
+	Error           sql.NullString  `db:"error" json:"error"`
+	ScheduledFor    time.Time       `db:"scheduled_for" json:"scheduled_for"`
+	StartedAt       sql.NullTime    `db:"started_at" json:"started_at"`
+	CompletedAt     sql.NullTime    `db:"completed_at" json:"completed_at"`
+	CreatedAt       sql.NullTime    `db:"created_at" json:"created_at"`
+	UpdatedAt       sql.NullTime    `db:"updated_at" json:"updated_at"`
 }
 
 // JWT refresh tokens for session management
 type RefreshToken struct {
-	ID        uuid.UUID          `db:"id" json:"id"`
-	UserID    uuid.UUID          `db:"user_id" json:"user_id"`
-	TokenHash string             `db:"token_hash" json:"token_hash"`
-	ExpiresAt time.Time          `db:"expires_at" json:"expires_at"`
-	Revoked   *bool              `db:"revoked" json:"revoked"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID        uuid.UUID    `db:"id" json:"id"`
+	UserID    uuid.UUID    `db:"user_id" json:"user_id"`
+	TokenHash string       `db:"token_hash" json:"token_hash"`
+	ExpiresAt time.Time    `db:"expires_at" json:"expires_at"`
+	Revoked   sql.NullBool `db:"revoked" json:"revoked"`
+	CreatedAt sql.NullTime `db:"created_at" json:"created_at"`
 }
 
 // Role-based access control
 type Role struct {
-	ID          uuid.UUID          `db:"id" json:"id"`
-	Name        string             `db:"name" json:"name"`
-	Description *string            `db:"description" json:"description"`
-	Permissions []byte             `db:"permissions" json:"permissions"`
-	IsSystem    *bool              `db:"is_system" json:"is_system"`
-	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID          uuid.UUID             `db:"id" json:"id"`
+	Name        string                `db:"name" json:"name"`
+	Description sql.NullString        `db:"description" json:"description"`
+	Permissions pqtype.NullRawMessage `db:"permissions" json:"permissions"`
+	IsSystem    sql.NullBool          `db:"is_system" json:"is_system"`
+	CreatedAt   sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt   sql.NullTime          `db:"updated_at" json:"updated_at"`
 }
 
 // Posts scheduled for future publishing
 type ScheduledPost struct {
-	ID                      uuid.UUID          `db:"id" json:"id"`
-	TeamID                  uuid.UUID          `db:"team_id" json:"team_id"`
-	CreatedBy               uuid.UUID          `db:"created_by" json:"created_by"`
-	SocialAccountID         uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	Content                 string             `db:"content" json:"content"`
-	ContentHtml             *string            `db:"content_html" json:"content_html"`
-	ShortenedLinks          []byte             `db:"shortened_links" json:"shortened_links"`
-	Status                  NullPostStatus     `db:"status" json:"status"`
-	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	PublishedAt             pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	ErrorMessage            *string            `db:"error_message" json:"error_message"`
-	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
-	MaxRetries              *int32             `db:"max_retries" json:"max_retries"`
-	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt               pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ID                      uuid.UUID             `db:"id" json:"id"`
+	TeamID                  uuid.UUID             `db:"team_id" json:"team_id"`
+	CreatedBy               uuid.UUID             `db:"created_by" json:"created_by"`
+	SocialAccountID         uuid.UUID             `db:"social_account_id" json:"social_account_id"`
+	Content                 string                `db:"content" json:"content"`
+	ContentHtml             sql.NullString        `db:"content_html" json:"content_html"`
+	ShortenedLinks          pqtype.NullRawMessage `db:"shortened_links" json:"shortened_links"`
+	Status                  NullPostStatus        `db:"status" json:"status"`
+	ScheduledAt             sql.NullTime          `db:"scheduled_at" json:"scheduled_at"`
+	PublishedAt             sql.NullTime          `db:"published_at" json:"published_at"`
+	PlatformSpecificOptions pqtype.NullRawMessage `db:"platform_specific_options" json:"platform_specific_options"`
+	ErrorMessage            sql.NullString        `db:"error_message" json:"error_message"`
+	RetryCount              sql.NullInt32         `db:"retry_count" json:"retry_count"`
+	MaxRetries              sql.NullInt32         `db:"max_retries" json:"max_retries"`
+	CreatedAt               sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt               sql.NullTime          `db:"updated_at" json:"updated_at"`
+	DeletedAt               sql.NullTime          `db:"deleted_at" json:"deleted_at"`
 }
 
 // Connected social media accounts
@@ -906,32 +907,32 @@ type SocialAccount struct {
 	TeamID         uuid.UUID               `db:"team_id" json:"team_id"`
 	Platform       SocialPlatform          `db:"platform" json:"platform"`
 	PlatformUserID string                  `db:"platform_user_id" json:"platform_user_id"`
-	Username       *string                 `db:"username" json:"username"`
-	DisplayName    *string                 `db:"display_name" json:"display_name"`
-	AvatarUrl      *string                 `db:"avatar_url" json:"avatar_url"`
-	ProfileUrl     *string                 `db:"profile_url" json:"profile_url"`
-	AccountType    *string                 `db:"account_type" json:"account_type"`
+	Username       sql.NullString          `db:"username" json:"username"`
+	DisplayName    sql.NullString          `db:"display_name" json:"display_name"`
+	AvatarUrl      sql.NullString          `db:"avatar_url" json:"avatar_url"`
+	ProfileUrl     sql.NullString          `db:"profile_url" json:"profile_url"`
+	AccountType    sql.NullString          `db:"account_type" json:"account_type"`
 	Status         NullSocialAccountStatus `db:"status" json:"status"`
-	Metadata       []byte                  `db:"metadata" json:"metadata"`
-	ConnectedBy    pgtype.UUID             `db:"connected_by" json:"connected_by"`
-	ConnectedAt    pgtype.Timestamptz      `db:"connected_at" json:"connected_at"`
-	LastSyncedAt   pgtype.Timestamptz      `db:"last_synced_at" json:"last_synced_at"`
-	CreatedAt      pgtype.Timestamptz      `db:"created_at" json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz      `db:"updated_at" json:"updated_at"`
-	DeletedAt      pgtype.Timestamptz      `db:"deleted_at" json:"deleted_at"`
+	Metadata       pqtype.NullRawMessage   `db:"metadata" json:"metadata"`
+	ConnectedBy    uuid.NullUUID           `db:"connected_by" json:"connected_by"`
+	ConnectedAt    sql.NullTime            `db:"connected_at" json:"connected_at"`
+	LastSyncedAt   sql.NullTime            `db:"last_synced_at" json:"last_synced_at"`
+	CreatedAt      sql.NullTime            `db:"created_at" json:"created_at"`
+	UpdatedAt      sql.NullTime            `db:"updated_at" json:"updated_at"`
+	DeletedAt      sql.NullTime            `db:"deleted_at" json:"deleted_at"`
 }
 
 // OAuth tokens for social platforms (encrypted)
 type SocialToken struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	AccessToken     string             `db:"access_token" json:"access_token"`
-	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
-	TokenType       *string            `db:"token_type" json:"token_type"`
-	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	Scope           *string            `db:"scope" json:"scope"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID              uuid.UUID      `db:"id" json:"id"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
+	AccessToken     string         `db:"access_token" json:"access_token"`
+	RefreshToken    sql.NullString `db:"refresh_token" json:"refresh_token"`
+	TokenType       sql.NullString `db:"token_type" json:"token_type"`
+	ExpiresAt       sql.NullTime   `db:"expires_at" json:"expires_at"`
+	Scope           sql.NullString `db:"scope" json:"scope"`
+	CreatedAt       sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt       sql.NullTime   `db:"updated_at" json:"updated_at"`
 }
 
 // Team subscriptions
@@ -941,72 +942,72 @@ type Subscription struct {
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
 	Interval             PlanInterval           `db:"interval" json:"interval"`
-	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
-	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
-	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
-	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
-	CancelAtPeriodEnd    *bool                  `db:"cancel_at_period_end" json:"cancel_at_period_end"`
-	CanceledAt           pgtype.Timestamptz     `db:"canceled_at" json:"canceled_at"`
-	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
-	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
-	CreatedAt            pgtype.Timestamptz     `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz     `db:"updated_at" json:"updated_at"`
+	StripeSubscriptionID sql.NullString         `db:"stripe_subscription_id" json:"stripe_subscription_id"`
+	StripeCustomerID     sql.NullString         `db:"stripe_customer_id" json:"stripe_customer_id"`
+	CurrentPeriodStart   sql.NullTime           `db:"current_period_start" json:"current_period_start"`
+	CurrentPeriodEnd     sql.NullTime           `db:"current_period_end" json:"current_period_end"`
+	CancelAtPeriodEnd    sql.NullBool           `db:"cancel_at_period_end" json:"cancel_at_period_end"`
+	CanceledAt           sql.NullTime           `db:"canceled_at" json:"canceled_at"`
+	TrialStart           sql.NullTime           `db:"trial_start" json:"trial_start"`
+	TrialEnd             sql.NullTime           `db:"trial_end" json:"trial_end"`
+	CreatedAt            sql.NullTime           `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime           `db:"updated_at" json:"updated_at"`
 }
 
 // Organizations/teams for multi-tenancy
 type Team struct {
-	ID        uuid.UUID          `db:"id" json:"id"`
-	Name      string             `db:"name" json:"name"`
-	Slug      string             `db:"slug" json:"slug"`
-	AvatarUrl *string            `db:"avatar_url" json:"avatar_url"`
-	Settings  []byte             `db:"settings" json:"settings"`
-	IsActive  *bool              `db:"is_active" json:"is_active"`
-	CreatedBy pgtype.UUID        `db:"created_by" json:"created_by"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ID        uuid.UUID             `db:"id" json:"id"`
+	Name      string                `db:"name" json:"name"`
+	Slug      string                `db:"slug" json:"slug"`
+	AvatarUrl sql.NullString        `db:"avatar_url" json:"avatar_url"`
+	Settings  pqtype.NullRawMessage `db:"settings" json:"settings"`
+	IsActive  sql.NullBool          `db:"is_active" json:"is_active"`
+	CreatedBy uuid.NullUUID         `db:"created_by" json:"created_by"`
+	CreatedAt sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt sql.NullTime          `db:"updated_at" json:"updated_at"`
+	DeletedAt sql.NullTime          `db:"deleted_at" json:"deleted_at"`
 }
 
 // User membership in teams with roles
 type TeamMembership struct {
-	ID                   uuid.UUID          `db:"id" json:"id"`
-	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
-	UserID               uuid.UUID          `db:"user_id" json:"user_id"`
-	RoleID               uuid.UUID          `db:"role_id" json:"role_id"`
-	InvitedBy            pgtype.UUID        `db:"invited_by" json:"invited_by"`
-	InvitationToken      *string            `db:"invitation_token" json:"invitation_token"`
-	InvitationAcceptedAt pgtype.Timestamptz `db:"invitation_accepted_at" json:"invitation_accepted_at"`
-	IsActive             *bool              `db:"is_active" json:"is_active"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt            pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ID                   uuid.UUID      `db:"id" json:"id"`
+	TeamID               uuid.UUID      `db:"team_id" json:"team_id"`
+	UserID               uuid.UUID      `db:"user_id" json:"user_id"`
+	RoleID               uuid.UUID      `db:"role_id" json:"role_id"`
+	InvitedBy            uuid.NullUUID  `db:"invited_by" json:"invited_by"`
+	InvitationToken      sql.NullString `db:"invitation_token" json:"invitation_token"`
+	InvitationAcceptedAt sql.NullTime   `db:"invitation_accepted_at" json:"invitation_accepted_at"`
+	IsActive             sql.NullBool   `db:"is_active" json:"is_active"`
+	CreatedAt            sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt            sql.NullTime   `db:"deleted_at" json:"deleted_at"`
 }
 
 // User accounts with authentication
 type User struct {
-	ID            uuid.UUID          `db:"id" json:"id"`
-	Email         string             `db:"email" json:"email"`
-	EmailVerified *bool              `db:"email_verified" json:"email_verified"`
-	PasswordHash  *string            `db:"password_hash" json:"password_hash"`
-	FullName      *string            `db:"full_name" json:"full_name"`
-	AvatarUrl     *string            `db:"avatar_url" json:"avatar_url"`
-	Timezone      *string            `db:"timezone" json:"timezone"`
-	Locale        *string            `db:"locale" json:"locale"`
-	IsActive      *bool              `db:"is_active" json:"is_active"`
-	LastLoginAt   pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
-	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt     pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ID            uuid.UUID      `db:"id" json:"id"`
+	Email         string         `db:"email" json:"email"`
+	EmailVerified sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash  sql.NullString `db:"password_hash" json:"password_hash"`
+	FullName      sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl     sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone      sql.NullString `db:"timezone" json:"timezone"`
+	Locale        sql.NullString `db:"locale" json:"locale"`
+	IsActive      sql.NullBool   `db:"is_active" json:"is_active"`
+	LastLoginAt   sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt     sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt     sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt     sql.NullTime   `db:"deleted_at" json:"deleted_at"`
 }
 
 // Webhook event log
 type WebhooksLog struct {
-	ID          uuid.UUID          `db:"id" json:"id"`
-	Source      WebhookSource      `db:"source" json:"source"`
-	EventType   string             `db:"event_type" json:"event_type"`
-	Payload     json.RawMessage    `db:"payload" json:"payload"`
-	Processed   *bool              `db:"processed" json:"processed"`
-	ProcessedAt pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
-	Error       *string            `db:"error" json:"error"`
-	ReceivedAt  pgtype.Timestamptz `db:"received_at" json:"received_at"`
+	ID          uuid.UUID       `db:"id" json:"id"`
+	Source      WebhookSource   `db:"source" json:"source"`
+	EventType   string          `db:"event_type" json:"event_type"`
+	Payload     json.RawMessage `db:"payload" json:"payload"`
+	Processed   sql.NullBool    `db:"processed" json:"processed"`
+	ProcessedAt sql.NullTime    `db:"processed_at" json:"processed_at"`
+	Error       sql.NullString  `db:"error" json:"error"`
+	ReceivedAt  sql.NullTime    `db:"received_at" json:"received_at"`
 }

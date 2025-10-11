@@ -15,7 +15,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	JWT      JWTConfig
-	Email    EmailConfig // ADD THIS
+	Email    EmailConfig
 	Security SecurityConfig
 	CORS     CORSConfig
 	Social   SocialConfig
@@ -177,4 +177,12 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 		return boolValue
 	}
 	return defaultValue
+}
+
+func stringsFromEnv(key string, defaultValue []string) []string {
+	value := getEnv(key, "")
+	if value == "" {
+		return defaultValue
+	}
+	return strings.Split(value, ",")
 }

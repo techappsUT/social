@@ -6,13 +6,13 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
-	AcceptInvitation(ctx context.Context, invitationToken *string) error
+	AcceptInvitation(ctx context.Context, invitationToken sql.NullString) error
 	// path: backend/sql/team_memberships.sql
 	AddMemberToTeam(ctx context.Context, arg AddMemberToTeamParams) (TeamMembership, error)
 	CancelSubscription(ctx context.Context, id uuid.UUID) error
@@ -90,12 +90,12 @@ type Querier interface {
 	GetNextQueuedPosts(ctx context.Context, limit int32) ([]PostQueue, error)
 	GetPlanByID(ctx context.Context, id uuid.UUID) (Plan, error)
 	GetPlanBySlug(ctx context.Context, slug string) (Plan, error)
-	GetPlanByStripeMonthlyID(ctx context.Context, stripePriceIDMonthly *string) (Plan, error)
-	GetPlanByStripeYearlyID(ctx context.Context, stripePriceIDYearly *string) (Plan, error)
+	GetPlanByStripeMonthlyID(ctx context.Context, stripePriceIDMonthly sql.NullString) (Plan, error)
+	GetPlanByStripeYearlyID(ctx context.Context, stripePriceIDYearly sql.NullString) (Plan, error)
 	GetPostAttachmentByID(ctx context.Context, id uuid.UUID) (PostAttachment, error)
 	GetPostByID(ctx context.Context, id uuid.UUID) (Post, error)
 	GetPostByPlatformID(ctx context.Context, arg GetPostByPlatformIDParams) (Post, error)
-	GetPostByScheduledPostID(ctx context.Context, scheduledPostID pgtype.UUID) (Post, error)
+	GetPostByScheduledPostID(ctx context.Context, scheduledPostID uuid.NullUUID) (Post, error)
 	GetQueueItemByID(ctx context.Context, id uuid.UUID) (PostQueue, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	// path: backend/sql/roles.sql
@@ -106,7 +106,7 @@ type Querier interface {
 	GetSocialAccountByID(ctx context.Context, id uuid.UUID) (SocialAccount, error)
 	GetSocialAccountWithToken(ctx context.Context, id uuid.UUID) (GetSocialAccountWithTokenRow, error)
 	GetSocialTokenByAccountID(ctx context.Context, socialAccountID uuid.UUID) (SocialToken, error)
-	GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID *string) (Subscription, error)
+	GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID sql.NullString) (Subscription, error)
 	GetSubscriptionByTeamID(ctx context.Context, teamID uuid.UUID) (GetSubscriptionByTeamIDRow, error)
 	GetTeamByID(ctx context.Context, id uuid.UUID) (Team, error)
 	GetTeamBySlug(ctx context.Context, slug string) (Team, error)

@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -27,17 +28,17 @@ RETURNING id, email, email_verified, password_hash, full_name, avatar_url, timez
 `
 
 type CreateUserParams struct {
-	Email         string  `db:"email" json:"email"`
-	EmailVerified *bool   `db:"email_verified" json:"email_verified"`
-	PasswordHash  *string `db:"password_hash" json:"password_hash"`
-	FullName      *string `db:"full_name" json:"full_name"`
-	AvatarUrl     *string `db:"avatar_url" json:"avatar_url"`
-	Timezone      *string `db:"timezone" json:"timezone"`
+	Email         string         `db:"email" json:"email"`
+	EmailVerified sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash  sql.NullString `db:"password_hash" json:"password_hash"`
+	FullName      sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl     sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone      sql.NullString `db:"timezone" json:"timezone"`
 }
 
 // path: backend/sql/users.sql
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, CreateUser,
+	row := q.db.QueryRowContext(ctx, CreateUser,
 		arg.Email,
 		arg.EmailVerified,
 		arg.PasswordHash,
@@ -70,7 +71,7 @@ WHERE email = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRow(ctx, GetUserByEmail, email)
+	row := q.db.QueryRowContext(ctx, GetUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -96,7 +97,7 @@ WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, GetUserByID, id)
+	row := q.db.QueryRowContext(ctx, GetUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -125,7 +126,7 @@ WHERE id = $1
 `
 
 func (q *Queries) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, MarkUserEmailVerified, id)
+	_, err := q.db.ExecContext(ctx, MarkUserEmailVerified, id)
 	return err
 }
 
@@ -138,7 +139,7 @@ WHERE id = $1
 `
 
 func (q *Queries) SoftDeleteUser(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, SoftDeleteUser, id)
+	_, err := q.db.ExecContext(ctx, SoftDeleteUser, id)
 	return err
 }
 
@@ -149,7 +150,7 @@ WHERE id = $1
 `
 
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, UpdateUserLastLogin, id)
+	_, err := q.db.ExecContext(ctx, UpdateUserLastLogin, id)
 	return err
 }
 
@@ -162,12 +163,12 @@ WHERE id = $1 AND deleted_at IS NULL
 `
 
 type UpdateUserPasswordParams struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	PasswordHash *string   `db:"password_hash" json:"password_hash"`
+	ID           uuid.UUID      `db:"id" json:"id"`
+	PasswordHash sql.NullString `db:"password_hash" json:"password_hash"`
 }
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
-	_, err := q.db.Exec(ctx, UpdateUserPassword, arg.ID, arg.PasswordHash)
+	_, err := q.db.ExecContext(ctx, UpdateUserPassword, arg.ID, arg.PasswordHash)
 	return err
 }
 
@@ -183,14 +184,14 @@ RETURNING id, email, email_verified, password_hash, full_name, avatar_url, timez
 `
 
 type UpdateUserProfileParams struct {
-	FullName  *string   `db:"full_name" json:"full_name"`
-	AvatarUrl *string   `db:"avatar_url" json:"avatar_url"`
-	Timezone  *string   `db:"timezone" json:"timezone"`
-	ID        uuid.UUID `db:"id" json:"id"`
+	FullName  sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone  sql.NullString `db:"timezone" json:"timezone"`
+	ID        uuid.UUID      `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
-	row := q.db.QueryRow(ctx, UpdateUserProfile,
+	row := q.db.QueryRowContext(ctx, UpdateUserProfile,
 		arg.FullName,
 		arg.AvatarUrl,
 		arg.Timezone,

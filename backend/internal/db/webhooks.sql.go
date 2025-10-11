@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ WHERE source = $1
 `
 
 func (q *Queries) CountWebhooksBySource(ctx context.Context, source WebhookSource) (int64, error) {
-	row := q.db.QueryRow(ctx, CountWebhooksBySource, source)
+	row := q.db.QueryRowContext(ctx, CountWebhooksBySource, source)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -42,13 +43,13 @@ type CreateWebhookLogParams struct {
 	Source    WebhookSource   `db:"source" json:"source"`
 	EventType string          `db:"event_type" json:"event_type"`
 	Payload   json.RawMessage `db:"payload" json:"payload"`
-	Processed *bool           `db:"processed" json:"processed"`
+	Processed sql.NullBool    `db:"processed" json:"processed"`
 }
 
 // path: backend/sql/webhooks.sql
 // 🔄 REFACTORED - Match actual schema (webhooks_log table)
 func (q *Queries) CreateWebhookLog(ctx context.Context, arg CreateWebhookLogParams) (WebhooksLog, error) {
-	row := q.db.QueryRow(ctx, CreateWebhookLog,
+	row := q.db.QueryRowContext(ctx, CreateWebhookLog,
 		arg.Source,
 		arg.EventType,
 		arg.Payload,
@@ -73,7 +74,7 @@ SELECT id, source, event_type, payload, processed, processed_at, error, received
 `
 
 func (q *Queries) GetWebhookLogByID(ctx context.Context, id uuid.UUID) (WebhooksLog, error) {
-	row := q.db.QueryRow(ctx, GetWebhookLogByID, id)
+	row := q.db.QueryRowContext(ctx, GetWebhookLogByID, id)
 	var i WebhooksLog
 	err := row.Scan(
 		&i.ID,
@@ -96,7 +97,7 @@ LIMIT $1
 `
 
 func (q *Queries) ListUnprocessedWebhooks(ctx context.Context, limit int32) ([]WebhooksLog, error) {
-	rows, err := q.db.Query(ctx, ListUnprocessedWebhooks, limit)
+	rows, err := q.db.QueryContext(ctx, ListUnprocessedWebhooks, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +118,9 @@ func (q *Queries) ListUnprocessedWebhooks(ctx context.Context, limit int32) ([]W
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -138,7 +142,7 @@ type ListWebhookLogsParams struct {
 }
 
 func (q *Queries) ListWebhookLogs(ctx context.Context, arg ListWebhookLogsParams) ([]WebhooksLog, error) {
-	rows, err := q.db.Query(ctx, ListWebhookLogs, arg.Source, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, ListWebhookLogs, arg.Source, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +164,9 @@ func (q *Queries) ListWebhookLogs(ctx context.Context, arg ListWebhookLogsParams
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -173,6 +180,6 @@ WHERE id = $1
 `
 
 func (q *Queries) MarkWebhookProcessed(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, MarkWebhookProcessed, id)
+	_, err := q.db.ExecContext(ctx, MarkWebhookProcessed, id)
 	return err
 }

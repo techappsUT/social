@@ -7,9 +7,9 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const CountUnpaidInvoices = `-- name: CountUnpaidInvoices :one
@@ -21,7 +21,7 @@ WHERE s.team_id = $1
 `
 
 func (q *Queries) CountUnpaidInvoices(ctx context.Context, teamID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, CountUnpaidInvoices, teamID)
+	row := q.db.QueryRowContext(ctx, CountUnpaidInvoices, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -45,20 +45,20 @@ RETURNING id, subscription_id, stripe_invoice_id, amount_due, amount_paid, curre
 `
 
 type CreateInvoiceParams struct {
-	SubscriptionID  uuid.UUID          `db:"subscription_id" json:"subscription_id"`
-	StripeInvoiceID string             `db:"stripe_invoice_id" json:"stripe_invoice_id"`
-	AmountDue       pgtype.Numeric     `db:"amount_due" json:"amount_due"`
-	AmountPaid      pgtype.Numeric     `db:"amount_paid" json:"amount_paid"`
-	Currency        *string            `db:"currency" json:"currency"`
-	Status          NullInvoiceStatus  `db:"status" json:"status"`
-	DueDate         pgtype.Timestamptz `db:"due_date" json:"due_date"`
-	PaidAt          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	SubscriptionID  uuid.UUID         `db:"subscription_id" json:"subscription_id"`
+	StripeInvoiceID string            `db:"stripe_invoice_id" json:"stripe_invoice_id"`
+	AmountDue       string            `db:"amount_due" json:"amount_due"`
+	AmountPaid      sql.NullString    `db:"amount_paid" json:"amount_paid"`
+	Currency        sql.NullString    `db:"currency" json:"currency"`
+	Status          NullInvoiceStatus `db:"status" json:"status"`
+	DueDate         sql.NullTime      `db:"due_date" json:"due_date"`
+	PaidAt          sql.NullTime      `db:"paid_at" json:"paid_at"`
 }
 
 // path: backend/sql/invoices.sql
 // 🔄 REFACTORED - Use due_date, paid_at (no invoice_date, no invoice_pdf_url)
 func (q *Queries) CreateInvoice(ctx context.Context, arg CreateInvoiceParams) (Invoice, error) {
-	row := q.db.QueryRow(ctx, CreateInvoice,
+	row := q.db.QueryRowContext(ctx, CreateInvoice,
 		arg.SubscriptionID,
 		arg.StripeInvoiceID,
 		arg.AmountDue,
@@ -92,7 +92,7 @@ SELECT id, subscription_id, stripe_invoice_id, amount_due, amount_paid, currency
 `
 
 func (q *Queries) GetInvoiceByID(ctx context.Context, id uuid.UUID) (Invoice, error) {
-	row := q.db.QueryRow(ctx, GetInvoiceByID, id)
+	row := q.db.QueryRowContext(ctx, GetInvoiceByID, id)
 	var i Invoice
 	err := row.Scan(
 		&i.ID,
@@ -117,7 +117,7 @@ SELECT id, subscription_id, stripe_invoice_id, amount_due, amount_paid, currency
 `
 
 func (q *Queries) GetInvoiceByStripeID(ctx context.Context, stripeInvoiceID string) (Invoice, error) {
-	row := q.db.QueryRow(ctx, GetInvoiceByStripeID, stripeInvoiceID)
+	row := q.db.QueryRowContext(ctx, GetInvoiceByStripeID, stripeInvoiceID)
 	var i Invoice
 	err := row.Scan(
 		&i.ID,
@@ -144,7 +144,7 @@ ORDER BY created_at DESC
 `
 
 func (q *Queries) ListInvoicesBySubscription(ctx context.Context, subscriptionID uuid.UUID) ([]Invoice, error) {
-	rows, err := q.db.Query(ctx, ListInvoicesBySubscription, subscriptionID)
+	rows, err := q.db.QueryContext(ctx, ListInvoicesBySubscription, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +170,9 @@ func (q *Queries) ListInvoicesBySubscription(ctx context.Context, subscriptionID
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -193,7 +196,7 @@ type ListInvoicesByTeamParams struct {
 }
 
 func (q *Queries) ListInvoicesByTeam(ctx context.Context, arg ListInvoicesByTeamParams) ([]Invoice, error) {
-	rows, err := q.db.Query(ctx, ListInvoicesByTeam, arg.TeamID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, ListInvoicesByTeam, arg.TeamID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +223,9 @@ func (q *Queries) ListInvoicesByTeam(ctx context.Context, arg ListInvoicesByTeam
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -237,14 +243,14 @@ WHERE id = $1
 `
 
 type UpdateInvoiceStatusParams struct {
-	ID         uuid.UUID          `db:"id" json:"id"`
-	Status     NullInvoiceStatus  `db:"status" json:"status"`
-	AmountPaid pgtype.Numeric     `db:"amount_paid" json:"amount_paid"`
-	PaidAt     pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	ID         uuid.UUID         `db:"id" json:"id"`
+	Status     NullInvoiceStatus `db:"status" json:"status"`
+	AmountPaid sql.NullString    `db:"amount_paid" json:"amount_paid"`
+	PaidAt     sql.NullTime      `db:"paid_at" json:"paid_at"`
 }
 
 func (q *Queries) UpdateInvoiceStatus(ctx context.Context, arg UpdateInvoiceStatusParams) error {
-	_, err := q.db.Exec(ctx, UpdateInvoiceStatus,
+	_, err := q.db.ExecContext(ctx, UpdateInvoiceStatus,
 		arg.ID,
 		arg.Status,
 		arg.AmountPaid,

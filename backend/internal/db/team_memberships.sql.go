@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const AcceptInvitation = `-- name: AcceptInvitation :exec
@@ -21,8 +22,8 @@ SET
 WHERE invitation_token = $1 AND invitation_accepted_at IS NULL
 `
 
-func (q *Queries) AcceptInvitation(ctx context.Context, invitationToken *string) error {
-	_, err := q.db.Exec(ctx, AcceptInvitation, invitationToken)
+func (q *Queries) AcceptInvitation(ctx context.Context, invitationToken sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, AcceptInvitation, invitationToken)
 	return err
 }
 
@@ -41,16 +42,16 @@ RETURNING id, team_id, user_id, role_id, invited_by, invitation_token, invitatio
 `
 
 type AddMemberToTeamParams struct {
-	TeamID    uuid.UUID   `db:"team_id" json:"team_id"`
-	UserID    uuid.UUID   `db:"user_id" json:"user_id"`
-	RoleID    uuid.UUID   `db:"role_id" json:"role_id"`
-	InvitedBy pgtype.UUID `db:"invited_by" json:"invited_by"`
-	IsActive  *bool       `db:"is_active" json:"is_active"`
+	TeamID    uuid.UUID     `db:"team_id" json:"team_id"`
+	UserID    uuid.UUID     `db:"user_id" json:"user_id"`
+	RoleID    uuid.UUID     `db:"role_id" json:"role_id"`
+	InvitedBy uuid.NullUUID `db:"invited_by" json:"invited_by"`
+	IsActive  sql.NullBool  `db:"is_active" json:"is_active"`
 }
 
 // path: backend/sql/team_memberships.sql
 func (q *Queries) AddMemberToTeam(ctx context.Context, arg AddMemberToTeamParams) (TeamMembership, error) {
-	row := q.db.QueryRow(ctx, AddMemberToTeam,
+	row := q.db.QueryRowContext(ctx, AddMemberToTeam,
 		arg.TeamID,
 		arg.UserID,
 		arg.RoleID,
@@ -89,15 +90,15 @@ RETURNING id, team_id, user_id, role_id, invited_by, invitation_token, invitatio
 `
 
 type CreateInvitationParams struct {
-	TeamID          uuid.UUID   `db:"team_id" json:"team_id"`
-	UserID          uuid.UUID   `db:"user_id" json:"user_id"`
-	RoleID          uuid.UUID   `db:"role_id" json:"role_id"`
-	InvitedBy       pgtype.UUID `db:"invited_by" json:"invited_by"`
-	InvitationToken *string     `db:"invitation_token" json:"invitation_token"`
+	TeamID          uuid.UUID      `db:"team_id" json:"team_id"`
+	UserID          uuid.UUID      `db:"user_id" json:"user_id"`
+	RoleID          uuid.UUID      `db:"role_id" json:"role_id"`
+	InvitedBy       uuid.NullUUID  `db:"invited_by" json:"invited_by"`
+	InvitationToken sql.NullString `db:"invitation_token" json:"invitation_token"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (TeamMembership, error) {
-	row := q.db.QueryRow(ctx, CreateInvitation,
+	row := q.db.QueryRowContext(ctx, CreateInvitation,
 		arg.TeamID,
 		arg.UserID,
 		arg.RoleID,
@@ -136,23 +137,23 @@ type GetTeamMembershipParams struct {
 }
 
 type GetTeamMembershipRow struct {
-	ID                   uuid.UUID          `db:"id" json:"id"`
-	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
-	UserID               uuid.UUID          `db:"user_id" json:"user_id"`
-	RoleID               uuid.UUID          `db:"role_id" json:"role_id"`
-	InvitedBy            pgtype.UUID        `db:"invited_by" json:"invited_by"`
-	InvitationToken      *string            `db:"invitation_token" json:"invitation_token"`
-	InvitationAcceptedAt pgtype.Timestamptz `db:"invitation_accepted_at" json:"invitation_accepted_at"`
-	IsActive             *bool              `db:"is_active" json:"is_active"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt            pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	RoleName             string             `db:"role_name" json:"role_name"`
-	RolePermissions      []byte             `db:"role_permissions" json:"role_permissions"`
+	ID                   uuid.UUID             `db:"id" json:"id"`
+	TeamID               uuid.UUID             `db:"team_id" json:"team_id"`
+	UserID               uuid.UUID             `db:"user_id" json:"user_id"`
+	RoleID               uuid.UUID             `db:"role_id" json:"role_id"`
+	InvitedBy            uuid.NullUUID         `db:"invited_by" json:"invited_by"`
+	InvitationToken      sql.NullString        `db:"invitation_token" json:"invitation_token"`
+	InvitationAcceptedAt sql.NullTime          `db:"invitation_accepted_at" json:"invitation_accepted_at"`
+	IsActive             sql.NullBool          `db:"is_active" json:"is_active"`
+	CreatedAt            sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime          `db:"updated_at" json:"updated_at"`
+	DeletedAt            sql.NullTime          `db:"deleted_at" json:"deleted_at"`
+	RoleName             string                `db:"role_name" json:"role_name"`
+	RolePermissions      pqtype.NullRawMessage `db:"role_permissions" json:"role_permissions"`
 }
 
 func (q *Queries) GetTeamMembership(ctx context.Context, arg GetTeamMembershipParams) (GetTeamMembershipRow, error) {
-	row := q.db.QueryRow(ctx, GetTeamMembership, arg.TeamID, arg.UserID)
+	row := q.db.QueryRowContext(ctx, GetTeamMembership, arg.TeamID, arg.UserID)
 	var i GetTeamMembershipRow
 	err := row.Scan(
 		&i.ID,
@@ -189,25 +190,25 @@ ORDER BY tm.created_at ASC
 `
 
 type ListTeamMembersRow struct {
-	ID                   uuid.UUID          `db:"id" json:"id"`
-	TeamID               uuid.UUID          `db:"team_id" json:"team_id"`
-	UserID               uuid.UUID          `db:"user_id" json:"user_id"`
-	RoleID               uuid.UUID          `db:"role_id" json:"role_id"`
-	InvitedBy            pgtype.UUID        `db:"invited_by" json:"invited_by"`
-	InvitationToken      *string            `db:"invitation_token" json:"invitation_token"`
-	InvitationAcceptedAt pgtype.Timestamptz `db:"invitation_accepted_at" json:"invitation_accepted_at"`
-	IsActive             *bool              `db:"is_active" json:"is_active"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt            pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	Email                string             `db:"email" json:"email"`
-	FullName             *string            `db:"full_name" json:"full_name"`
-	AvatarUrl            *string            `db:"avatar_url" json:"avatar_url"`
-	RoleName             string             `db:"role_name" json:"role_name"`
+	ID                   uuid.UUID      `db:"id" json:"id"`
+	TeamID               uuid.UUID      `db:"team_id" json:"team_id"`
+	UserID               uuid.UUID      `db:"user_id" json:"user_id"`
+	RoleID               uuid.UUID      `db:"role_id" json:"role_id"`
+	InvitedBy            uuid.NullUUID  `db:"invited_by" json:"invited_by"`
+	InvitationToken      sql.NullString `db:"invitation_token" json:"invitation_token"`
+	InvitationAcceptedAt sql.NullTime   `db:"invitation_accepted_at" json:"invitation_accepted_at"`
+	IsActive             sql.NullBool   `db:"is_active" json:"is_active"`
+	CreatedAt            sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt            sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+	Email                string         `db:"email" json:"email"`
+	FullName             sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl            sql.NullString `db:"avatar_url" json:"avatar_url"`
+	RoleName             string         `db:"role_name" json:"role_name"`
 }
 
 func (q *Queries) ListTeamMembers(ctx context.Context, teamID uuid.UUID) ([]ListTeamMembersRow, error) {
-	rows, err := q.db.Query(ctx, ListTeamMembers, teamID)
+	rows, err := q.db.QueryContext(ctx, ListTeamMembers, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +237,9 @@ func (q *Queries) ListTeamMembers(ctx context.Context, teamID uuid.UUID) ([]List
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -256,7 +260,7 @@ type RemoveMemberFromTeamParams struct {
 }
 
 func (q *Queries) RemoveMemberFromTeam(ctx context.Context, arg RemoveMemberFromTeamParams) error {
-	_, err := q.db.Exec(ctx, RemoveMemberFromTeam, arg.TeamID, arg.UserID)
+	_, err := q.db.ExecContext(ctx, RemoveMemberFromTeam, arg.TeamID, arg.UserID)
 	return err
 }
 
@@ -276,7 +280,7 @@ type UpdateMemberRoleParams struct {
 }
 
 func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (TeamMembership, error) {
-	row := q.db.QueryRow(ctx, UpdateMemberRole, arg.TeamID, arg.RoleID, arg.UserID)
+	row := q.db.QueryRowContext(ctx, UpdateMemberRole, arg.TeamID, arg.RoleID, arg.UserID)
 	var i TeamMembership
 	err := row.Scan(
 		&i.ID,

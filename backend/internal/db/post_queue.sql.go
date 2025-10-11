@@ -7,10 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const CompleteQueueItem = `-- name: CompleteQueueItem :exec
@@ -23,7 +23,7 @@ WHERE id = $1
 `
 
 func (q *Queries) CompleteQueueItem(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, CompleteQueueItem, id)
+	_, err := q.db.ExecContext(ctx, CompleteQueueItem, id)
 	return err
 }
 
@@ -33,7 +33,7 @@ WHERE status = $1
 `
 
 func (q *Queries) CountQueuedPostsByStatus(ctx context.Context, status NullQueueStatus) (int64, error) {
-	row := q.db.QueryRow(ctx, CountQueuedPostsByStatus, status)
+	row := q.db.QueryRowContext(ctx, CountQueuedPostsByStatus, status)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -53,16 +53,16 @@ RETURNING id, scheduled_post_id, status, priority, attempts, max_attempts, error
 `
 
 type EnqueuePostParams struct {
-	ScheduledPostID uuid.UUID `db:"scheduled_post_id" json:"scheduled_post_id"`
-	Priority        *int32    `db:"priority" json:"priority"`
-	ScheduledFor    time.Time `db:"scheduled_for" json:"scheduled_for"`
-	MaxAttempts     *int32    `db:"max_attempts" json:"max_attempts"`
+	ScheduledPostID uuid.UUID     `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Priority        sql.NullInt32 `db:"priority" json:"priority"`
+	ScheduledFor    time.Time     `db:"scheduled_for" json:"scheduled_for"`
+	MaxAttempts     sql.NullInt32 `db:"max_attempts" json:"max_attempts"`
 }
 
 // path: backend/sql/post_queue.sql
 // 🔄 REFACTORED - Use max_attempts and error (not max_retries, error_message)
 func (q *Queries) EnqueuePost(ctx context.Context, arg EnqueuePostParams) (PostQueue, error) {
-	row := q.db.QueryRow(ctx, EnqueuePost,
+	row := q.db.QueryRowContext(ctx, EnqueuePost,
 		arg.ScheduledPostID,
 		arg.Priority,
 		arg.ScheduledFor,
@@ -99,12 +99,12 @@ WHERE id = $1
 `
 
 type FailQueueItemParams struct {
-	ID    uuid.UUID `db:"id" json:"id"`
-	Error *string   `db:"error" json:"error"`
+	ID    uuid.UUID      `db:"id" json:"id"`
+	Error sql.NullString `db:"error" json:"error"`
 }
 
 func (q *Queries) FailQueueItem(ctx context.Context, arg FailQueueItemParams) error {
-	_, err := q.db.Exec(ctx, FailQueueItem, arg.ID, arg.Error)
+	_, err := q.db.ExecContext(ctx, FailQueueItem, arg.ID, arg.Error)
 	return err
 }
 
@@ -118,7 +118,7 @@ FOR UPDATE SKIP LOCKED
 `
 
 func (q *Queries) GetNextQueuedPosts(ctx context.Context, limit int32) ([]PostQueue, error) {
-	rows, err := q.db.Query(ctx, GetNextQueuedPosts, limit)
+	rows, err := q.db.QueryContext(ctx, GetNextQueuedPosts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +144,9 @@ func (q *Queries) GetNextQueuedPosts(ctx context.Context, limit int32) ([]PostQu
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -155,7 +158,7 @@ SELECT id, scheduled_post_id, status, priority, attempts, max_attempts, error, s
 `
 
 func (q *Queries) GetQueueItemByID(ctx context.Context, id uuid.UUID) (PostQueue, error) {
-	row := q.db.QueryRow(ctx, GetQueueItemByID, id)
+	row := q.db.QueryRowContext(ctx, GetQueueItemByID, id)
 	var i PostQueue
 	err := row.Scan(
 		&i.ID,
@@ -195,25 +198,25 @@ type ListPendingQueueItemsParams struct {
 }
 
 type ListPendingQueueItemsRow struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID uuid.UUID          `db:"scheduled_post_id" json:"scheduled_post_id"`
-	Status          NullQueueStatus    `db:"status" json:"status"`
-	Priority        *int32             `db:"priority" json:"priority"`
-	Attempts        *int32             `db:"attempts" json:"attempts"`
-	MaxAttempts     *int32             `db:"max_attempts" json:"max_attempts"`
-	Error           *string            `db:"error" json:"error"`
-	ScheduledFor    time.Time          `db:"scheduled_for" json:"scheduled_for"`
-	StartedAt       pgtype.Timestamptz `db:"started_at" json:"started_at"`
-	CompletedAt     pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Content         string             `db:"content" json:"content"`
-	Platform        SocialPlatform     `db:"platform" json:"platform"`
-	Username        *string            `db:"username" json:"username"`
+	ID              uuid.UUID       `db:"id" json:"id"`
+	ScheduledPostID uuid.UUID       `db:"scheduled_post_id" json:"scheduled_post_id"`
+	Status          NullQueueStatus `db:"status" json:"status"`
+	Priority        sql.NullInt32   `db:"priority" json:"priority"`
+	Attempts        sql.NullInt32   `db:"attempts" json:"attempts"`
+	MaxAttempts     sql.NullInt32   `db:"max_attempts" json:"max_attempts"`
+	Error           sql.NullString  `db:"error" json:"error"`
+	ScheduledFor    time.Time       `db:"scheduled_for" json:"scheduled_for"`
+	StartedAt       sql.NullTime    `db:"started_at" json:"started_at"`
+	CompletedAt     sql.NullTime    `db:"completed_at" json:"completed_at"`
+	CreatedAt       sql.NullTime    `db:"created_at" json:"created_at"`
+	UpdatedAt       sql.NullTime    `db:"updated_at" json:"updated_at"`
+	Content         string          `db:"content" json:"content"`
+	Platform        SocialPlatform  `db:"platform" json:"platform"`
+	Username        sql.NullString  `db:"username" json:"username"`
 }
 
 func (q *Queries) ListPendingQueueItems(ctx context.Context, arg ListPendingQueueItemsParams) ([]ListPendingQueueItemsRow, error) {
-	rows, err := q.db.Query(ctx, ListPendingQueueItems, arg.ScheduledFor, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, ListPendingQueueItems, arg.ScheduledFor, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +245,9 @@ func (q *Queries) ListPendingQueueItems(ctx context.Context, arg ListPendingQueu
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -262,7 +268,7 @@ type ListQueuedPostsByStatusParams struct {
 }
 
 func (q *Queries) ListQueuedPostsByStatus(ctx context.Context, arg ListQueuedPostsByStatusParams) ([]PostQueue, error) {
-	rows, err := q.db.Query(ctx, ListQueuedPostsByStatus, arg.Status, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, ListQueuedPostsByStatus, arg.Status, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +294,9 @@ func (q *Queries) ListQueuedPostsByStatus(ctx context.Context, arg ListQueuedPos
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -305,7 +314,7 @@ WHERE id = $1
 `
 
 func (q *Queries) LockQueueItem(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, LockQueueItem, id)
+	_, err := q.db.ExecContext(ctx, LockQueueItem, id)
 	return err
 }
 
@@ -320,6 +329,6 @@ WHERE id = $1
 `
 
 func (q *Queries) RetryFailedQueueItem(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, RetryFailedQueueItem, id)
+	_, err := q.db.ExecContext(ctx, RetryFailedQueueItem, id)
 	return err
 }

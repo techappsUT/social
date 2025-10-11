@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/domain/user"
 )
@@ -26,23 +28,40 @@ func NewUserRepository(database *sql.DB) user.Repository {
 	}
 }
 
+// ============================================================================
+// CORE CRUD OPERATIONS
+// ============================================================================
+
 // Create persists a new user
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	params := db.CreateUserParams{
-		Email:         u.Email(),
-		EmailVerified: &[]bool{u.IsEmailVerified()}[0],
-		PasswordHash:  &[]string{u.PasswordHash()}[0],
-		FullName:      &[]string{fmt.Sprintf("%s %s", u.FirstName(), u.LastName())}[0],
+		Email: u.Email(),
+		EmailVerified: sql.NullBool{
+			Bool:  u.IsEmailVerified(),
+			Valid: true,
+		},
+		PasswordHash: sql.NullString{
+			String: u.PasswordHash(),
+			Valid:  true,
+		},
+		FullName: sql.NullString{
+			String: fmt.Sprintf("%s %s", u.FirstName(), u.LastName()),
+			Valid:  true,
+		},
 	}
 
 	dbUser, err := r.queries.CreateUser(ctx, params)
 	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok {
+			if pqErr.Code == "23505" { // unique_violation
+				return user.ErrEmailAlreadyExists
+			}
+		}
 		return fmt.Errorf("failed to create user: %w", err)
 	}
 
 	// Update the user ID from database
 	u.SetID(dbUser.ID)
-
 	return nil
 }
 
@@ -59,7 +78,7 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 	`
 
 	fullName := fmt.Sprintf("%s %s", u.FirstName(), u.LastName())
-	_, err := r.db.ExecContext(
+	result, err := r.db.ExecContext(
 		ctx,
 		query,
 		u.ID(),
@@ -69,13 +88,30 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 		u.LastLoginAt(),
 	)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return user.ErrUserNotFound
+	}
+
+	return nil
 }
 
 // Delete performs a soft delete on a user
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.queries.SoftDeleteUser(ctx, id)
 }
+
+// ============================================================================
+// FINDER METHODS
+// ============================================================================
 
 // FindByID retrieves a user by ID
 func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*user.User, error) {
@@ -86,7 +122,6 @@ func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*user.User
 		}
 		return nil, err
 	}
-
 	return r.mapToDomain(dbUser), nil
 }
 
@@ -99,7 +134,6 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*user.U
 		}
 		return nil, err
 	}
-
 	return r.mapToDomain(dbUser), nil
 }
 
@@ -121,24 +155,6 @@ func (r *UserRepository) FindByEmailOrUsername(ctx context.Context, identifier s
 	return r.FindByUsername(ctx, identifier)
 }
 
-// ExistsByEmail checks if a user exists with the given email
-func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	_, err := r.queries.GetUserByEmail(ctx, email)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-// ExistsByUsername checks if a user exists with the given username
-func (r *UserRepository) ExistsByUsername(ctx context.Context, username string) (bool, error) {
-	// TODO: Implement when username column is added
-	return false, nil
-}
-
 // FindAll retrieves all users with pagination
 func (r *UserRepository) FindAll(ctx context.Context, offset, limit int) ([]*user.User, error) {
 	query := `
@@ -154,16 +170,7 @@ func (r *UserRepository) FindAll(ctx context.Context, offset, limit int) ([]*use
 	}
 	defer rows.Close()
 
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		if err := rows.Scan(&dbUser); err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-
-	return users, nil
+	return r.scanUsers(rows)
 }
 
 // FindByRole retrieves users by role
@@ -189,16 +196,7 @@ func (r *UserRepository) FindByStatus(ctx context.Context, status user.Status, o
 	}
 	defer rows.Close()
 
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		if err := rows.Scan(&dbUser); err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-
-	return users, nil
+	return r.scanUsers(rows)
 }
 
 // FindByTeamID retrieves users by team ID
@@ -217,17 +215,120 @@ func (r *UserRepository) FindByTeamID(ctx context.Context, teamID uuid.UUID, off
 	}
 	defer rows.Close()
 
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		if err := rows.Scan(&dbUser); err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-
-	return users, nil
+	return r.scanUsers(rows)
 }
+
+// ============================================================================
+// ADVANCED FINDER METHODS
+// ============================================================================
+
+// Search searches users by query string
+func (r *UserRepository) Search(ctx context.Context, searchQuery string, offset, limit int) ([]*user.User, error) {
+	query := `
+		SELECT * FROM users 
+		WHERE (
+			email ILIKE $1 OR 
+			full_name ILIKE $1
+		) AND deleted_at IS NULL
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	searchPattern := "%" + searchQuery + "%"
+	rows, err := r.db.QueryContext(ctx, query, searchPattern, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanUsers(rows)
+}
+
+// FindInactiveSince finds users inactive since a given time
+func (r *UserRepository) FindInactiveSince(ctx context.Context, since time.Time, offset, limit int) ([]*user.User, error) {
+	query := `
+		SELECT * FROM users 
+		WHERE (last_login_at < $1 OR last_login_at IS NULL) 
+		AND deleted_at IS NULL
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, since, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanUsers(rows)
+}
+
+// FindRecentlyCreated finds recently created users
+func (r *UserRepository) FindRecentlyCreated(ctx context.Context, duration time.Duration, offset, limit int) ([]*user.User, error) {
+	since := time.Now().Add(-duration)
+
+	query := `
+		SELECT * FROM users
+		WHERE created_at > $1 AND deleted_at IS NULL
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, since, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanUsers(rows)
+}
+
+// FindUnverifiedOlderThan finds unverified users older than specified duration
+func (r *UserRepository) FindUnverifiedOlderThan(ctx context.Context, duration time.Duration) ([]*user.User, error) {
+	cutoffTime := time.Now().Add(-duration)
+
+	query := `
+		SELECT * FROM users 
+		WHERE (email_verified = false OR email_verified IS NULL)
+		AND created_at < $1
+		AND deleted_at IS NULL
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, cutoffTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanUsers(rows)
+}
+
+// ============================================================================
+// EXISTENCE CHECKS
+// ============================================================================
+
+// ExistsByEmail checks if a user exists with the given email
+func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+	_, err := r.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// ExistsByUsername checks if a user exists with the given username
+func (r *UserRepository) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+	// TODO: Implement when username column is added
+	return false, nil
+}
+
+// ============================================================================
+// COUNT METHODS
+// ============================================================================
 
 // Count returns the total number of users
 func (r *UserRepository) Count(ctx context.Context) (int64, error) {
@@ -253,124 +354,144 @@ func (r *UserRepository) CountByStatus(ctx context.Context, status user.Status) 
 }
 
 // ============================================================================
-// ADVANCED REPOSITORY METHODS (from domain/user/repository.go)
+// UPDATE METHODS
 // ============================================================================
 
-// FindByVerificationToken finds a user by email verification token
-func (r *UserRepository) FindByVerificationToken(ctx context.Context, token string) (*user.User, error) {
-	// TODO: Implement when tokens table is added
-	return nil, user.ErrUserNotFound
-}
-
-// FindByPasswordResetToken finds a user by password reset token
-func (r *UserRepository) FindByPasswordResetToken(ctx context.Context, token string) (*user.User, error) {
-	// TODO: Implement when tokens table is added
-	return nil, user.ErrUserNotFound
-}
-
-// UpdatePassword updates user password
-func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
-	query := `UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, hashedPassword, time.Now())
-	return err
-}
-
-// UpdateEmailVerified marks email as verified
-func (r *UserRepository) UpdateEmailVerified(ctx context.Context, userID uuid.UUID, verified bool) error {
-	query := `UPDATE users SET email_verified = $2, updated_at = $3 WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, verified, time.Now())
-	return err
-}
-
-// UpdateLastLogin updates last login timestamp
-func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID uuid.UUID, timestamp time.Time) error {
+// UpdateLastLogin updates only the last login timestamp
+func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, lastLoginAt time.Time) error {
 	query := `UPDATE users SET last_login_at = $2, updated_at = $3 WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, timestamp, time.Now())
+	_, err := r.db.ExecContext(ctx, query, id, lastLoginAt, time.Now())
 	return err
+}
+
+// UpdatePassword updates only the password hash
+func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	query := `UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id, passwordHash, time.Now())
+	return err
+}
+
+// UpdateEmailVerificationStatus updates the email verification status
+func (r *UserRepository) UpdateEmailVerificationStatus(ctx context.Context, id uuid.UUID, verified bool) error {
+	query := `UPDATE users SET email_verified = $2, updated_at = $3 WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id, verified, time.Now())
+	return err
+}
+
+// UpdateStatus updates only the user status
+func (r *UserRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status user.Status) error {
+	isActive := status == user.StatusActive
+	query := `UPDATE users SET is_active = $2, updated_at = $3 WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id, isActive, time.Now())
+	return err
+}
+
+// UpdateRole updates only the user role
+func (r *UserRepository) UpdateRole(ctx context.Context, id uuid.UUID, role user.Role) error {
+	// TODO: Add role column to database
+	return nil
 }
 
 // BulkUpdateStatus updates status for multiple users
-func (r *UserRepository) BulkUpdateStatus(ctx context.Context, userIDs []uuid.UUID, status user.Status) error {
-	if len(userIDs) == 0 {
+func (r *UserRepository) BulkUpdateStatus(ctx context.Context, ids []uuid.UUID, status user.Status) error {
+	if len(ids) == 0 {
 		return nil
 	}
 
 	isActive := status == user.StatusActive
 
 	// Build placeholders for IN clause
-	query := `UPDATE users SET is_active = $1, updated_at = $2 WHERE id = ANY($3::uuid[]) AND deleted_at IS NULL`
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids)+2)
+	args[0] = isActive
+	args[1] = time.Now()
 
-	_, err := r.db.ExecContext(ctx, query, isActive, time.Now(), userIDs)
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+3)
+		args[i+2] = id
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE users SET is_active = $1, updated_at = $2 WHERE id IN (%s) AND deleted_at IS NULL",
+		strings.Join(placeholders, ","),
+	)
+
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
-// Search performs text search on users
-func (r *UserRepository) Search(ctx context.Context, query string, offset, limit int) ([]*user.User, error) {
-	searchQuery := `
-		SELECT * FROM users 
-		WHERE (
-			email ILIKE $1 OR
-			full_name ILIKE $1
-		) AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
+// ============================================================================
+// RESTORE AND DELETE METHODS
+// ============================================================================
 
-	searchTerm := "%" + query + "%"
-	rows, err := r.db.QueryContext(ctx, searchQuery, searchTerm, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// Restore restores a soft-deleted user
+func (r *UserRepository) Restore(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE users SET deleted_at = NULL, updated_at = $2 WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id, time.Now())
+	return err
+}
 
+// HardDelete permanently deletes a user (use with extreme caution)
+func (r *UserRepository) HardDelete(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM users WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id)
+	return err
+}
+
+// ============================================================================
+// HELPER METHODS
+// ============================================================================
+
+// scanUsers scans multiple user rows
+func (r *UserRepository) scanUsers(rows *sql.Rows) ([]*user.User, error) {
 	var users []*user.User
 	for rows.Next() {
-		var dbUser db.User
-		if err := rows.Scan(&dbUser); err != nil {
+		dbUser := db.User{}
+		err := rows.Scan(
+			&dbUser.ID,
+			&dbUser.Email,
+			&dbUser.PasswordHash,
+			&dbUser.FullName,
+			&dbUser.AvatarUrl,
+			&dbUser.IsActive,
+			&dbUser.EmailVerified,
+			&dbUser.LastLoginAt,
+			&dbUser.CreatedAt,
+			&dbUser.UpdatedAt,
+			&dbUser.DeletedAt,
+		)
+		if err != nil {
 			return nil, err
 		}
 		users = append(users, r.mapToDomain(dbUser))
 	}
-
 	return users, nil
 }
-
-// GetTeamMembers gets all users in a specific team
-func (r *UserRepository) GetTeamMembers(ctx context.Context, teamID uuid.UUID) ([]*user.User, error) {
-	return r.FindByTeamID(ctx, teamID, 0, 1000) // Get up to 1000 members
-}
-
-// GetActiveUsersCount returns count of active users
-func (r *UserRepository) GetActiveUsersCount(ctx context.Context, since time.Time) (int64, error) {
-	var count int64
-	query := `SELECT COUNT(*) FROM users WHERE last_login_at > $1 AND deleted_at IS NULL`
-	err := r.db.QueryRowContext(ctx, query, since).Scan(&count)
-	return count, err
-}
-
-// ============================================================================
-// PRIVATE HELPER METHODS
-// ============================================================================
 
 // mapToDomain maps database user to domain user
 func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 	// Extract first and last name from full_name
 	firstName := ""
 	lastName := ""
-	if dbUser.FullName != nil {
-		// Simple split - in production use proper parsing
-		firstName = *dbUser.FullName
+	if dbUser.FullName.Valid && dbUser.FullName.String != "" {
+		parts := strings.SplitN(dbUser.FullName.String, " ", 2)
+		if len(parts) > 0 {
+			firstName = parts[0]
+		}
+		if len(parts) > 1 {
+			lastName = parts[1]
+		}
 	}
 
-	// Default password hash if nil
+	// Handle password hash
 	passwordHash := ""
-	if dbUser.PasswordHash != nil {
-		passwordHash = *dbUser.PasswordHash
+	if dbUser.PasswordHash.Valid {
+		passwordHash = dbUser.PasswordHash.String
 	}
 
-	// Map status
+	// Determine status
 	status := user.StatusActive
-	if dbUser.IsActive != nil && !*dbUser.IsActive {
+	if dbUser.IsActive.Valid && !dbUser.IsActive.Bool {
 		status = user.StatusInactive
 	}
 
@@ -379,8 +500,8 @@ func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 
 	// Handle email verified
 	emailVerified := false
-	if dbUser.EmailVerified != nil {
-		emailVerified = *dbUser.EmailVerified
+	if dbUser.EmailVerified.Valid {
+		emailVerified = dbUser.EmailVerified.Bool
 	}
 
 	// Convert timestamps
@@ -396,6 +517,12 @@ func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 		deletedAt = &t
 	}
 
+	// Avatar URL
+	avatarURL := ""
+	if dbUser.AvatarUrl.Valid {
+		avatarURL = dbUser.AvatarUrl.String
+	}
+
 	return user.Reconstruct(
 		dbUser.ID,
 		dbUser.Email,
@@ -403,7 +530,7 @@ func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 		passwordHash,
 		firstName,
 		lastName,
-		"", // avatarURL
+		avatarURL,
 		role,
 		status,
 		emailVerified,
@@ -412,244 +539,4 @@ func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 		dbUser.UpdatedAt.Time,
 		deletedAt,
 	)
-}
-
-// path: backend/internal/infrastructure/persistence/user_repository.go
-// ADD THESE MISSING METHODS TO YOUR EXISTING UserRepository
-
-// FindInactiveSince finds users inactive since a given time
-func (r *UserRepository) FindInactiveSince(ctx context.Context, since time.Time, offset, limit int) ([]*user.User, error) {
-	query := `
-		SELECT * FROM users 
-		WHERE (last_login_at < $1 OR last_login_at IS NULL) 
-		AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, since, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		// Properly scan all columns
-		err := scanUser(rows, &dbUser)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-
-	return users, nil
-}
-
-// FindRecentlyCreated finds recently created users
-// func (r *UserRepository) FindRecentlyCreated(ctx context.Context, since time.Time, offset, limit int) ([]*user.User, error) {
-// 	query := `
-// 		SELECT * FROM users
-// 		WHERE created_at > $1 AND deleted_at IS NULL
-// 		ORDER BY created_at DESC
-// 		LIMIT $2 OFFSET $3
-// 	`
-
-// 	rows, err := r.db.QueryContext(ctx, query, since, limit, offset)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-
-// 	var users []*user.User
-// 	for rows.Next() {
-// 		var dbUser db.User
-// 		err := scanUser(rows, &dbUser)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		users = append(users, r.mapToDomain(dbUser))
-// 	}
-
-// 	return users, nil
-// }
-
-// FindPendingVerification finds users with unverified emails
-func (r *UserRepository) FindPendingVerification(ctx context.Context, offset, limit int) ([]*user.User, error) {
-	query := `
-		SELECT * FROM users 
-		WHERE (email_verified = false OR email_verified IS NULL)
-		AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		err := scanUser(rows, &dbUser)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-
-	return users, nil
-}
-
-// BulkCreate creates multiple users at once
-func (r *UserRepository) BulkCreate(ctx context.Context, users []*user.User) error {
-	if len(users) == 0 {
-		return nil
-	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO users (email, password_hash, full_name, email_verified, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, u := range users {
-		fullName := fmt.Sprintf("%s %s", u.FirstName(), u.LastName())
-		_, err = stmt.ExecContext(
-			ctx,
-			u.Email(),
-			u.PasswordHash(),
-			fullName,
-			u.IsEmailVerified(),
-			time.Now(),
-			time.Now(),
-		)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-// UpdateAvatar updates user avatar URL
-func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL string) error {
-	query := `UPDATE users SET avatar_url = $2, updated_at = $3 WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, avatarURL, time.Now())
-	return err
-}
-
-// UpdateProfile updates user profile information
-func (r *UserRepository) UpdateProfile(ctx context.Context, userID uuid.UUID, firstName, lastName string) error {
-	fullName := fmt.Sprintf("%s %s", firstName, lastName)
-	query := `UPDATE users SET full_name = $2, updated_at = $3 WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, fullName, time.Now())
-	return err
-}
-
-// GetStatistics returns user statistics
-func (r *UserRepository) GetStatistics(ctx context.Context) (*user.Statistics, error) {
-	stats := &user.Statistics{}
-
-	// Total users
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`,
-	).Scan(&stats.TotalUsers)
-	if err != nil {
-		return nil, err
-	}
-
-	// Active users (logged in last 30 days)
-	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
-	err = r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM users WHERE last_login_at > $1 AND deleted_at IS NULL`,
-		thirtyDaysAgo,
-	).Scan(&stats.ActiveUsers)
-	if err != nil {
-		return nil, err
-	}
-
-	// Verified users
-	err = r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM users WHERE email_verified = true AND deleted_at IS NULL`,
-	).Scan(&stats.VerifiedUsers)
-	if err != nil {
-		return nil, err
-	}
-
-	// New users (last 7 days)
-	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
-	err = r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM users WHERE created_at > $1 AND deleted_at IS NULL`,
-		sevenDaysAgo,
-	).Scan(&stats.NewUsersThisWeek)
-	if err != nil {
-		return nil, err
-	}
-
-	return stats, nil
-}
-
-// Helper function to scan user from rows
-func scanUser(rows *sql.Rows, u *db.User) error {
-	return rows.Scan(
-		&u.ID,
-		&u.Email,
-		&u.EmailVerified,
-		&u.PasswordHash,
-		&u.FullName,
-		&u.AvatarUrl,
-		&u.Timezone,
-		&u.Locale,
-		&u.IsActive,
-		&u.LastLoginAt,
-		&u.CreatedAt,
-		&u.UpdatedAt,
-		&u.DeletedAt,
-	)
-}
-
-// path: backend/internal/infrastructure/persistence/user_repository.go
-
-// FindRecentlyCreated finds recently created users
-func (r *UserRepository) FindRecentlyCreated(ctx context.Context, since time.Duration, offset, limit int) ([]*user.User, error) {
-	// Convert duration to absolute time
-	sinceTime := time.Now().Add(-since)
-
-	query := `
-		SELECT * FROM users 
-		WHERE created_at > $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, sinceTime, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		err := scanUser(rows, &dbUser)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-
-	return users, nil
 }

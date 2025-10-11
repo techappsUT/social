@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CancelSubscription = `-- name: CancelSubscription :exec
@@ -22,7 +23,7 @@ WHERE id = $1
 `
 
 func (q *Queries) CancelSubscription(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, CancelSubscription, id)
+	_, err := q.db.ExecContext(ctx, CancelSubscription, id)
 	return err
 }
 
@@ -48,17 +49,17 @@ type CreateSubscriptionParams struct {
 	TeamID               uuid.UUID              `db:"team_id" json:"team_id"`
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
-	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
-	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
-	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
-	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
-	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
-	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
+	StripeSubscriptionID sql.NullString         `db:"stripe_subscription_id" json:"stripe_subscription_id"`
+	StripeCustomerID     sql.NullString         `db:"stripe_customer_id" json:"stripe_customer_id"`
+	CurrentPeriodStart   sql.NullTime           `db:"current_period_start" json:"current_period_start"`
+	CurrentPeriodEnd     sql.NullTime           `db:"current_period_end" json:"current_period_end"`
+	TrialStart           sql.NullTime           `db:"trial_start" json:"trial_start"`
+	TrialEnd             sql.NullTime           `db:"trial_end" json:"trial_end"`
 }
 
 // path: backend/sql/subscriptions.sql
 func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error) {
-	row := q.db.QueryRow(ctx, CreateSubscription,
+	row := q.db.QueryRowContext(ctx, CreateSubscription,
 		arg.TeamID,
 		arg.PlanID,
 		arg.Status,
@@ -95,8 +96,8 @@ SELECT id, team_id, plan_id, status, interval, stripe_subscription_id, stripe_cu
 WHERE stripe_subscription_id = $1
 `
 
-func (q *Queries) GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID *string) (Subscription, error) {
-	row := q.db.QueryRow(ctx, GetSubscriptionByStripeID, stripeSubscriptionID)
+func (q *Queries) GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID sql.NullString) (Subscription, error) {
+	row := q.db.QueryRowContext(ctx, GetSubscriptionByStripeID, stripeSubscriptionID)
 	var i Subscription
 	err := row.Scan(
 		&i.ID,
@@ -131,22 +132,22 @@ type GetSubscriptionByTeamIDRow struct {
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
 	Interval             PlanInterval           `db:"interval" json:"interval"`
-	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
-	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
-	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
-	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
-	CancelAtPeriodEnd    *bool                  `db:"cancel_at_period_end" json:"cancel_at_period_end"`
-	CanceledAt           pgtype.Timestamptz     `db:"canceled_at" json:"canceled_at"`
-	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
-	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
-	CreatedAt            pgtype.Timestamptz     `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz     `db:"updated_at" json:"updated_at"`
+	StripeSubscriptionID sql.NullString         `db:"stripe_subscription_id" json:"stripe_subscription_id"`
+	StripeCustomerID     sql.NullString         `db:"stripe_customer_id" json:"stripe_customer_id"`
+	CurrentPeriodStart   sql.NullTime           `db:"current_period_start" json:"current_period_start"`
+	CurrentPeriodEnd     sql.NullTime           `db:"current_period_end" json:"current_period_end"`
+	CancelAtPeriodEnd    sql.NullBool           `db:"cancel_at_period_end" json:"cancel_at_period_end"`
+	CanceledAt           sql.NullTime           `db:"canceled_at" json:"canceled_at"`
+	TrialStart           sql.NullTime           `db:"trial_start" json:"trial_start"`
+	TrialEnd             sql.NullTime           `db:"trial_end" json:"trial_end"`
+	CreatedAt            sql.NullTime           `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime           `db:"updated_at" json:"updated_at"`
 	PlanName             string                 `db:"plan_name" json:"plan_name"`
-	PlanFeatures         []byte                 `db:"plan_features" json:"plan_features"`
+	PlanFeatures         pqtype.NullRawMessage  `db:"plan_features" json:"plan_features"`
 }
 
 func (q *Queries) GetSubscriptionByTeamID(ctx context.Context, teamID uuid.UUID) (GetSubscriptionByTeamIDRow, error) {
-	row := q.db.QueryRow(ctx, GetSubscriptionByTeamID, teamID)
+	row := q.db.QueryRowContext(ctx, GetSubscriptionByTeamID, teamID)
 	var i GetSubscriptionByTeamIDRow
 	err := row.Scan(
 		&i.ID,
@@ -181,8 +182,8 @@ ORDER BY s.current_period_end ASC
 `
 
 type ListExpiringSubscriptionsParams struct {
-	CurrentPeriodEnd   pgtype.Timestamptz `db:"current_period_end" json:"current_period_end"`
-	CurrentPeriodEnd_2 pgtype.Timestamptz `db:"current_period_end_2" json:"current_period_end_2"`
+	CurrentPeriodEnd   sql.NullTime `db:"current_period_end" json:"current_period_end"`
+	CurrentPeriodEnd_2 sql.NullTime `db:"current_period_end_2" json:"current_period_end_2"`
 }
 
 type ListExpiringSubscriptionsRow struct {
@@ -191,21 +192,21 @@ type ListExpiringSubscriptionsRow struct {
 	PlanID               uuid.UUID              `db:"plan_id" json:"plan_id"`
 	Status               NullSubscriptionStatus `db:"status" json:"status"`
 	Interval             PlanInterval           `db:"interval" json:"interval"`
-	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id"`
-	StripeCustomerID     *string                `db:"stripe_customer_id" json:"stripe_customer_id"`
-	CurrentPeriodStart   pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
-	CurrentPeriodEnd     pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
-	CancelAtPeriodEnd    *bool                  `db:"cancel_at_period_end" json:"cancel_at_period_end"`
-	CanceledAt           pgtype.Timestamptz     `db:"canceled_at" json:"canceled_at"`
-	TrialStart           pgtype.Timestamptz     `db:"trial_start" json:"trial_start"`
-	TrialEnd             pgtype.Timestamptz     `db:"trial_end" json:"trial_end"`
-	CreatedAt            pgtype.Timestamptz     `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz     `db:"updated_at" json:"updated_at"`
+	StripeSubscriptionID sql.NullString         `db:"stripe_subscription_id" json:"stripe_subscription_id"`
+	StripeCustomerID     sql.NullString         `db:"stripe_customer_id" json:"stripe_customer_id"`
+	CurrentPeriodStart   sql.NullTime           `db:"current_period_start" json:"current_period_start"`
+	CurrentPeriodEnd     sql.NullTime           `db:"current_period_end" json:"current_period_end"`
+	CancelAtPeriodEnd    sql.NullBool           `db:"cancel_at_period_end" json:"cancel_at_period_end"`
+	CanceledAt           sql.NullTime           `db:"canceled_at" json:"canceled_at"`
+	TrialStart           sql.NullTime           `db:"trial_start" json:"trial_start"`
+	TrialEnd             sql.NullTime           `db:"trial_end" json:"trial_end"`
+	CreatedAt            sql.NullTime           `db:"created_at" json:"created_at"`
+	UpdatedAt            sql.NullTime           `db:"updated_at" json:"updated_at"`
 	TeamName             string                 `db:"team_name" json:"team_name"`
 }
 
 func (q *Queries) ListExpiringSubscriptions(ctx context.Context, arg ListExpiringSubscriptionsParams) ([]ListExpiringSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, ListExpiringSubscriptions, arg.CurrentPeriodEnd, arg.CurrentPeriodEnd_2)
+	rows, err := q.db.QueryContext(ctx, ListExpiringSubscriptions, arg.CurrentPeriodEnd, arg.CurrentPeriodEnd_2)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +236,9 @@ func (q *Queries) ListExpiringSubscriptions(ctx context.Context, arg ListExpirin
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -254,12 +258,12 @@ WHERE id = $1
 type UpdateSubscriptionStatusParams struct {
 	ID                 uuid.UUID              `db:"id" json:"id"`
 	Status             NullSubscriptionStatus `db:"status" json:"status"`
-	CurrentPeriodStart pgtype.Timestamptz     `db:"current_period_start" json:"current_period_start"`
-	CurrentPeriodEnd   pgtype.Timestamptz     `db:"current_period_end" json:"current_period_end"`
+	CurrentPeriodStart sql.NullTime           `db:"current_period_start" json:"current_period_start"`
+	CurrentPeriodEnd   sql.NullTime           `db:"current_period_end" json:"current_period_end"`
 }
 
 func (q *Queries) UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscriptionStatusParams) error {
-	_, err := q.db.Exec(ctx, UpdateSubscriptionStatus,
+	_, err := q.db.ExecContext(ctx, UpdateSubscriptionStatus,
 		arg.ID,
 		arg.Status,
 		arg.CurrentPeriodStart,

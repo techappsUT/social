@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CreatePlan = `-- name: CreatePlan :one
@@ -32,22 +33,22 @@ RETURNING id, name, slug, description, price_monthly, price_yearly, features, li
 `
 
 type CreatePlanParams struct {
-	Name                 string         `db:"name" json:"name"`
-	Slug                 string         `db:"slug" json:"slug"`
-	Description          *string        `db:"description" json:"description"`
-	PriceMonthly         pgtype.Numeric `db:"price_monthly" json:"price_monthly"`
-	PriceYearly          pgtype.Numeric `db:"price_yearly" json:"price_yearly"`
-	Features             []byte         `db:"features" json:"features"`
-	Limits               []byte         `db:"limits" json:"limits"`
-	IsActive             *bool          `db:"is_active" json:"is_active"`
-	StripePriceIDMonthly *string        `db:"stripe_price_id_monthly" json:"stripe_price_id_monthly"`
-	StripePriceIDYearly  *string        `db:"stripe_price_id_yearly" json:"stripe_price_id_yearly"`
+	Name                 string                `db:"name" json:"name"`
+	Slug                 string                `db:"slug" json:"slug"`
+	Description          sql.NullString        `db:"description" json:"description"`
+	PriceMonthly         string                `db:"price_monthly" json:"price_monthly"`
+	PriceYearly          string                `db:"price_yearly" json:"price_yearly"`
+	Features             pqtype.NullRawMessage `db:"features" json:"features"`
+	Limits               pqtype.NullRawMessage `db:"limits" json:"limits"`
+	IsActive             sql.NullBool          `db:"is_active" json:"is_active"`
+	StripePriceIDMonthly sql.NullString        `db:"stripe_price_id_monthly" json:"stripe_price_id_monthly"`
+	StripePriceIDYearly  sql.NullString        `db:"stripe_price_id_yearly" json:"stripe_price_id_yearly"`
 }
 
 // path: backend/sql/plans.sql
 // 🔄 REFACTORED - Use price_monthly/yearly, stripe_price_id_monthly/yearly
 func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, error) {
-	row := q.db.QueryRow(ctx, CreatePlan,
+	row := q.db.QueryRowContext(ctx, CreatePlan,
 		arg.Name,
 		arg.Slug,
 		arg.Description,
@@ -87,7 +88,7 @@ WHERE id = $1
 `
 
 func (q *Queries) DeactivatePlan(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, DeactivatePlan, id)
+	_, err := q.db.ExecContext(ctx, DeactivatePlan, id)
 	return err
 }
 
@@ -96,7 +97,7 @@ SELECT id, name, slug, description, price_monthly, price_yearly, features, limit
 `
 
 func (q *Queries) GetPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
-	row := q.db.QueryRow(ctx, GetPlanByID, id)
+	row := q.db.QueryRowContext(ctx, GetPlanByID, id)
 	var i Plan
 	err := row.Scan(
 		&i.ID,
@@ -121,7 +122,7 @@ SELECT id, name, slug, description, price_monthly, price_yearly, features, limit
 `
 
 func (q *Queries) GetPlanBySlug(ctx context.Context, slug string) (Plan, error) {
-	row := q.db.QueryRow(ctx, GetPlanBySlug, slug)
+	row := q.db.QueryRowContext(ctx, GetPlanBySlug, slug)
 	var i Plan
 	err := row.Scan(
 		&i.ID,
@@ -145,8 +146,8 @@ const GetPlanByStripeMonthlyID = `-- name: GetPlanByStripeMonthlyID :one
 SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans WHERE stripe_price_id_monthly = $1
 `
 
-func (q *Queries) GetPlanByStripeMonthlyID(ctx context.Context, stripePriceIDMonthly *string) (Plan, error) {
-	row := q.db.QueryRow(ctx, GetPlanByStripeMonthlyID, stripePriceIDMonthly)
+func (q *Queries) GetPlanByStripeMonthlyID(ctx context.Context, stripePriceIDMonthly sql.NullString) (Plan, error) {
+	row := q.db.QueryRowContext(ctx, GetPlanByStripeMonthlyID, stripePriceIDMonthly)
 	var i Plan
 	err := row.Scan(
 		&i.ID,
@@ -170,8 +171,8 @@ const GetPlanByStripeYearlyID = `-- name: GetPlanByStripeYearlyID :one
 SELECT id, name, slug, description, price_monthly, price_yearly, features, limits, is_active, stripe_price_id_monthly, stripe_price_id_yearly, created_at, updated_at FROM plans WHERE stripe_price_id_yearly = $1
 `
 
-func (q *Queries) GetPlanByStripeYearlyID(ctx context.Context, stripePriceIDYearly *string) (Plan, error) {
-	row := q.db.QueryRow(ctx, GetPlanByStripeYearlyID, stripePriceIDYearly)
+func (q *Queries) GetPlanByStripeYearlyID(ctx context.Context, stripePriceIDYearly sql.NullString) (Plan, error) {
+	row := q.db.QueryRowContext(ctx, GetPlanByStripeYearlyID, stripePriceIDYearly)
 	var i Plan
 	err := row.Scan(
 		&i.ID,
@@ -198,7 +199,7 @@ ORDER BY price_monthly ASC
 `
 
 func (q *Queries) ListActivePlans(ctx context.Context) ([]Plan, error) {
-	rows, err := q.db.Query(ctx, ListActivePlans)
+	rows, err := q.db.QueryContext(ctx, ListActivePlans)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +225,9 @@ func (q *Queries) ListActivePlans(ctx context.Context) ([]Plan, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -237,7 +241,7 @@ ORDER BY price_monthly ASC
 `
 
 func (q *Queries) ListAllPlans(ctx context.Context) ([]Plan, error) {
-	rows, err := q.db.Query(ctx, ListAllPlans)
+	rows, err := q.db.QueryContext(ctx, ListAllPlans)
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +267,9 @@ func (q *Queries) ListAllPlans(ctx context.Context) ([]Plan, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -287,19 +294,19 @@ RETURNING id, name, slug, description, price_monthly, price_yearly, features, li
 `
 
 type UpdatePlanParams struct {
-	Name         *string        `db:"name" json:"name"`
-	Slug         *string        `db:"slug" json:"slug"`
-	Description  *string        `db:"description" json:"description"`
-	PriceMonthly pgtype.Numeric `db:"price_monthly" json:"price_monthly"`
-	PriceYearly  pgtype.Numeric `db:"price_yearly" json:"price_yearly"`
-	Features     []byte         `db:"features" json:"features"`
-	Limits       []byte         `db:"limits" json:"limits"`
-	IsActive     *bool          `db:"is_active" json:"is_active"`
-	ID           uuid.UUID      `db:"id" json:"id"`
+	Name         sql.NullString        `db:"name" json:"name"`
+	Slug         sql.NullString        `db:"slug" json:"slug"`
+	Description  sql.NullString        `db:"description" json:"description"`
+	PriceMonthly sql.NullString        `db:"price_monthly" json:"price_monthly"`
+	PriceYearly  sql.NullString        `db:"price_yearly" json:"price_yearly"`
+	Features     pqtype.NullRawMessage `db:"features" json:"features"`
+	Limits       pqtype.NullRawMessage `db:"limits" json:"limits"`
+	IsActive     sql.NullBool          `db:"is_active" json:"is_active"`
+	ID           uuid.UUID             `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (Plan, error) {
-	row := q.db.QueryRow(ctx, UpdatePlan,
+	row := q.db.QueryRowContext(ctx, UpdatePlan,
 		arg.Name,
 		arg.Slug,
 		arg.Description,

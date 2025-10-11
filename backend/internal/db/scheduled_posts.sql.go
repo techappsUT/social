@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CountScheduledPostsByTeam = `-- name: CountScheduledPostsByTeam :one
@@ -20,7 +21,7 @@ WHERE team_id = $1
 `
 
 func (q *Queries) CountScheduledPostsByTeam(ctx context.Context, teamID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, CountScheduledPostsByTeam, teamID)
+	row := q.db.QueryRowContext(ctx, CountScheduledPostsByTeam, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -45,21 +46,21 @@ RETURNING id, team_id, created_by, social_account_id, content, content_html, sho
 `
 
 type CreateScheduledPostParams struct {
-	TeamID                  uuid.UUID          `db:"team_id" json:"team_id"`
-	CreatedBy               uuid.UUID          `db:"created_by" json:"created_by"`
-	SocialAccountID         uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	Content                 string             `db:"content" json:"content"`
-	ContentHtml             *string            `db:"content_html" json:"content_html"`
-	ShortenedLinks          []byte             `db:"shortened_links" json:"shortened_links"`
-	Status                  NullPostStatus     `db:"status" json:"status"`
-	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
+	TeamID                  uuid.UUID             `db:"team_id" json:"team_id"`
+	CreatedBy               uuid.UUID             `db:"created_by" json:"created_by"`
+	SocialAccountID         uuid.UUID             `db:"social_account_id" json:"social_account_id"`
+	Content                 string                `db:"content" json:"content"`
+	ContentHtml             sql.NullString        `db:"content_html" json:"content_html"`
+	ShortenedLinks          pqtype.NullRawMessage `db:"shortened_links" json:"shortened_links"`
+	Status                  NullPostStatus        `db:"status" json:"status"`
+	ScheduledAt             sql.NullTime          `db:"scheduled_at" json:"scheduled_at"`
+	PlatformSpecificOptions pqtype.NullRawMessage `db:"platform_specific_options" json:"platform_specific_options"`
 }
 
 // path: backend/sql/scheduled_posts.sql
 // ✅ KEEP - Verify this file exists with these queries
 func (q *Queries) CreateScheduledPost(ctx context.Context, arg CreateScheduledPostParams) (ScheduledPost, error) {
-	row := q.db.QueryRow(ctx, CreateScheduledPost,
+	row := q.db.QueryRowContext(ctx, CreateScheduledPost,
 		arg.TeamID,
 		arg.CreatedBy,
 		arg.SocialAccountID,
@@ -107,33 +108,33 @@ LIMIT $2
 `
 
 type GetDuePostsParams struct {
-	ScheduledAt pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	Limit       int32              `db:"limit" json:"limit"`
+	ScheduledAt sql.NullTime `db:"scheduled_at" json:"scheduled_at"`
+	Limit       int32        `db:"limit" json:"limit"`
 }
 
 type GetDuePostsRow struct {
-	ID                      uuid.UUID          `db:"id" json:"id"`
-	TeamID                  uuid.UUID          `db:"team_id" json:"team_id"`
-	CreatedBy               uuid.UUID          `db:"created_by" json:"created_by"`
-	SocialAccountID         uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	Content                 string             `db:"content" json:"content"`
-	ContentHtml             *string            `db:"content_html" json:"content_html"`
-	ShortenedLinks          []byte             `db:"shortened_links" json:"shortened_links"`
-	Status                  NullPostStatus     `db:"status" json:"status"`
-	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	PublishedAt             pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	ErrorMessage            *string            `db:"error_message" json:"error_message"`
-	RetryCount              *int32             `db:"retry_count" json:"retry_count"`
-	MaxRetries              *int32             `db:"max_retries" json:"max_retries"`
-	CreatedAt               pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt               pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	Platform                SocialPlatform     `db:"platform" json:"platform"`
+	ID                      uuid.UUID             `db:"id" json:"id"`
+	TeamID                  uuid.UUID             `db:"team_id" json:"team_id"`
+	CreatedBy               uuid.UUID             `db:"created_by" json:"created_by"`
+	SocialAccountID         uuid.UUID             `db:"social_account_id" json:"social_account_id"`
+	Content                 string                `db:"content" json:"content"`
+	ContentHtml             sql.NullString        `db:"content_html" json:"content_html"`
+	ShortenedLinks          pqtype.NullRawMessage `db:"shortened_links" json:"shortened_links"`
+	Status                  NullPostStatus        `db:"status" json:"status"`
+	ScheduledAt             sql.NullTime          `db:"scheduled_at" json:"scheduled_at"`
+	PublishedAt             sql.NullTime          `db:"published_at" json:"published_at"`
+	PlatformSpecificOptions pqtype.NullRawMessage `db:"platform_specific_options" json:"platform_specific_options"`
+	ErrorMessage            sql.NullString        `db:"error_message" json:"error_message"`
+	RetryCount              sql.NullInt32         `db:"retry_count" json:"retry_count"`
+	MaxRetries              sql.NullInt32         `db:"max_retries" json:"max_retries"`
+	CreatedAt               sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt               sql.NullTime          `db:"updated_at" json:"updated_at"`
+	DeletedAt               sql.NullTime          `db:"deleted_at" json:"deleted_at"`
+	Platform                SocialPlatform        `db:"platform" json:"platform"`
 }
 
 func (q *Queries) GetDuePosts(ctx context.Context, arg GetDuePostsParams) ([]GetDuePostsRow, error) {
-	rows, err := q.db.Query(ctx, GetDuePosts, arg.ScheduledAt, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, GetDuePosts, arg.ScheduledAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +166,9 @@ func (q *Queries) GetDuePosts(ctx context.Context, arg GetDuePostsParams) ([]Get
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -177,7 +181,7 @@ WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetScheduledPostByID(ctx context.Context, id uuid.UUID) (ScheduledPost, error) {
-	row := q.db.QueryRow(ctx, GetScheduledPostByID, id)
+	row := q.db.QueryRowContext(ctx, GetScheduledPostByID, id)
 	var i ScheduledPost
 	err := row.Scan(
 		&i.ID,
@@ -211,12 +215,12 @@ WHERE id = $1
 `
 
 type IncrementRetryCountParams struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	ErrorMessage *string   `db:"error_message" json:"error_message"`
+	ID           uuid.UUID      `db:"id" json:"id"`
+	ErrorMessage sql.NullString `db:"error_message" json:"error_message"`
 }
 
 func (q *Queries) IncrementRetryCount(ctx context.Context, arg IncrementRetryCountParams) error {
-	_, err := q.db.Exec(ctx, IncrementRetryCount, arg.ID, arg.ErrorMessage)
+	_, err := q.db.ExecContext(ctx, IncrementRetryCount, arg.ID, arg.ErrorMessage)
 	return err
 }
 
@@ -235,7 +239,7 @@ type ListScheduledPostsByTeamParams struct {
 }
 
 func (q *Queries) ListScheduledPostsByTeam(ctx context.Context, arg ListScheduledPostsByTeamParams) ([]ScheduledPost, error) {
-	rows, err := q.db.Query(ctx, ListScheduledPostsByTeam, arg.TeamID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, ListScheduledPostsByTeam, arg.TeamID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +270,9 @@ func (q *Queries) ListScheduledPostsByTeam(ctx context.Context, arg ListSchedule
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -281,7 +288,7 @@ WHERE id = $1
 `
 
 func (q *Queries) SoftDeleteScheduledPost(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, SoftDeleteScheduledPost, id)
+	_, err := q.db.ExecContext(ctx, SoftDeleteScheduledPost, id)
 	return err
 }
 
@@ -298,15 +305,15 @@ RETURNING id, team_id, created_by, social_account_id, content, content_html, sho
 `
 
 type UpdateScheduledPostParams struct {
-	Content                 *string            `db:"content" json:"content"`
-	ContentHtml             *string            `db:"content_html" json:"content_html"`
-	ScheduledAt             pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
-	PlatformSpecificOptions []byte             `db:"platform_specific_options" json:"platform_specific_options"`
-	ID                      uuid.UUID          `db:"id" json:"id"`
+	Content                 sql.NullString        `db:"content" json:"content"`
+	ContentHtml             sql.NullString        `db:"content_html" json:"content_html"`
+	ScheduledAt             sql.NullTime          `db:"scheduled_at" json:"scheduled_at"`
+	PlatformSpecificOptions pqtype.NullRawMessage `db:"platform_specific_options" json:"platform_specific_options"`
+	ID                      uuid.UUID             `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateScheduledPost(ctx context.Context, arg UpdateScheduledPostParams) (ScheduledPost, error) {
-	row := q.db.QueryRow(ctx, UpdateScheduledPost,
+	row := q.db.QueryRowContext(ctx, UpdateScheduledPost,
 		arg.Content,
 		arg.ContentHtml,
 		arg.ScheduledAt,
@@ -348,15 +355,15 @@ WHERE id = $1
 `
 
 type UpdateScheduledPostStatusParams struct {
-	ID           uuid.UUID          `db:"id" json:"id"`
-	Status       NullPostStatus     `db:"status" json:"status"`
-	ErrorMessage *string            `db:"error_message" json:"error_message"`
-	RetryCount   *int32             `db:"retry_count" json:"retry_count"`
-	PublishedAt  pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	ID           uuid.UUID      `db:"id" json:"id"`
+	Status       NullPostStatus `db:"status" json:"status"`
+	ErrorMessage sql.NullString `db:"error_message" json:"error_message"`
+	RetryCount   sql.NullInt32  `db:"retry_count" json:"retry_count"`
+	PublishedAt  sql.NullTime   `db:"published_at" json:"published_at"`
 }
 
 func (q *Queries) UpdateScheduledPostStatus(ctx context.Context, arg UpdateScheduledPostStatusParams) error {
-	_, err := q.db.Exec(ctx, UpdateScheduledPostStatus,
+	_, err := q.db.ExecContext(ctx, UpdateScheduledPostStatus,
 		arg.ID,
 		arg.Status,
 		arg.ErrorMessage,

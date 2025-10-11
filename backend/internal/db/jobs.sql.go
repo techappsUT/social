@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CompleteJobRun = `-- name: CompleteJobRun :exec
@@ -23,12 +24,12 @@ WHERE id = $1
 `
 
 type CompleteJobRunParams struct {
-	ID     uuid.UUID `db:"id" json:"id"`
-	Result []byte    `db:"result" json:"result"`
+	ID     uuid.UUID             `db:"id" json:"id"`
+	Result pqtype.NullRawMessage `db:"result" json:"result"`
 }
 
 func (q *Queries) CompleteJobRun(ctx context.Context, arg CompleteJobRunParams) error {
-	_, err := q.db.Exec(ctx, CompleteJobRun, arg.ID, arg.Result)
+	_, err := q.db.ExecContext(ctx, CompleteJobRun, arg.ID, arg.Result)
 	return err
 }
 
@@ -46,16 +47,16 @@ RETURNING id, job_name, status, payload, result, error, started_at, completed_at
 `
 
 type CreateJobRunParams struct {
-	JobName   string             `db:"job_name" json:"job_name"`
-	Status    NullJobStatus      `db:"status" json:"status"`
-	Payload   []byte             `db:"payload" json:"payload"`
-	StartedAt pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	JobName   string                `db:"job_name" json:"job_name"`
+	Status    NullJobStatus         `db:"status" json:"status"`
+	Payload   pqtype.NullRawMessage `db:"payload" json:"payload"`
+	StartedAt sql.NullTime          `db:"started_at" json:"started_at"`
 }
 
 // path: backend/sql/jobs.sql
 // 🔄 REFACTORED - Match actual job_runs schema
 func (q *Queries) CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error) {
-	row := q.db.QueryRow(ctx, CreateJobRun,
+	row := q.db.QueryRowContext(ctx, CreateJobRun,
 		arg.JobName,
 		arg.Status,
 		arg.Payload,
@@ -88,12 +89,12 @@ WHERE id = $1
 `
 
 type FailJobRunParams struct {
-	ID    uuid.UUID `db:"id" json:"id"`
-	Error *string   `db:"error" json:"error"`
+	ID    uuid.UUID      `db:"id" json:"id"`
+	Error sql.NullString `db:"error" json:"error"`
 }
 
 func (q *Queries) FailJobRun(ctx context.Context, arg FailJobRunParams) error {
-	_, err := q.db.Exec(ctx, FailJobRun, arg.ID, arg.Error)
+	_, err := q.db.ExecContext(ctx, FailJobRun, arg.ID, arg.Error)
 	return err
 }
 
@@ -102,7 +103,7 @@ SELECT id, job_name, status, payload, result, error, started_at, completed_at, c
 `
 
 func (q *Queries) GetJobRunByID(ctx context.Context, id uuid.UUID) (JobRun, error) {
-	row := q.db.QueryRow(ctx, GetJobRunByID, id)
+	row := q.db.QueryRowContext(ctx, GetJobRunByID, id)
 	var i JobRun
 	err := row.Scan(
 		&i.ID,
@@ -129,12 +130,12 @@ LIMIT $2
 `
 
 type ListFailedJobRunsParams struct {
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	Limit     int32              `db:"limit" json:"limit"`
+	CreatedAt sql.NullTime `db:"created_at" json:"created_at"`
+	Limit     int32        `db:"limit" json:"limit"`
 }
 
 func (q *Queries) ListFailedJobRuns(ctx context.Context, arg ListFailedJobRunsParams) ([]JobRun, error) {
-	rows, err := q.db.Query(ctx, ListFailedJobRuns, arg.CreatedAt, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, ListFailedJobRuns, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +158,9 @@ func (q *Queries) ListFailedJobRuns(ctx context.Context, arg ListFailedJobRunsPa
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -178,7 +182,7 @@ type ListRecentJobRunsParams struct {
 }
 
 func (q *Queries) ListRecentJobRuns(ctx context.Context, arg ListRecentJobRunsParams) ([]JobRun, error) {
-	rows, err := q.db.Query(ctx, ListRecentJobRuns, arg.JobName, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, ListRecentJobRuns, arg.JobName, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +206,9 @@ func (q *Queries) ListRecentJobRuns(ctx context.Context, arg ListRecentJobRunsPa
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -222,6 +229,6 @@ type UpdateJobRunStatusParams struct {
 }
 
 func (q *Queries) UpdateJobRunStatus(ctx context.Context, arg UpdateJobRunStatusParams) error {
-	_, err := q.db.Exec(ctx, UpdateJobRunStatus, arg.ID, arg.Status)
+	_, err := q.db.ExecContext(ctx, UpdateJobRunStatus, arg.ID, arg.Status)
 	return err
 }

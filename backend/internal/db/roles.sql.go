@@ -7,8 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CreateRole = `-- name: CreateRole :one
@@ -23,13 +25,13 @@ RETURNING id, name, description, permissions, is_system, created_at, updated_at
 `
 
 type CreateRoleParams struct {
-	Name        string  `db:"name" json:"name"`
-	Description *string `db:"description" json:"description"`
-	Permissions []byte  `db:"permissions" json:"permissions"`
+	Name        string                `db:"name" json:"name"`
+	Description sql.NullString        `db:"description" json:"description"`
+	Permissions pqtype.NullRawMessage `db:"permissions" json:"permissions"`
 }
 
 func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error) {
-	row := q.db.QueryRow(ctx, CreateRole, arg.Name, arg.Description, arg.Permissions)
+	row := q.db.QueryRowContext(ctx, CreateRole, arg.Name, arg.Description, arg.Permissions)
 	var i Role
 	err := row.Scan(
 		&i.ID,
@@ -49,7 +51,7 @@ WHERE id = $1 AND is_system = FALSE
 `
 
 func (q *Queries) DeleteRole(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, DeleteRole, id)
+	_, err := q.db.ExecContext(ctx, DeleteRole, id)
 	return err
 }
 
@@ -61,7 +63,7 @@ SELECT id, name, description, permissions, is_system, created_at, updated_at FRO
 // path: backend/sql/roles.sql
 // 🆕 NEW - Role management queries
 func (q *Queries) GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error) {
-	row := q.db.QueryRow(ctx, GetRoleByID, id)
+	row := q.db.QueryRowContext(ctx, GetRoleByID, id)
 	var i Role
 	err := row.Scan(
 		&i.ID,
@@ -80,7 +82,7 @@ SELECT id, name, description, permissions, is_system, created_at, updated_at FRO
 `
 
 func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) {
-	row := q.db.QueryRow(ctx, GetRoleByName, name)
+	row := q.db.QueryRowContext(ctx, GetRoleByName, name)
 	var i Role
 	err := row.Scan(
 		&i.ID,
@@ -100,7 +102,7 @@ ORDER BY name ASC
 `
 
 func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
-	rows, err := q.db.Query(ctx, ListRoles)
+	rows, err := q.db.QueryContext(ctx, ListRoles)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +122,9 @@ func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -134,7 +139,7 @@ ORDER BY name ASC
 `
 
 func (q *Queries) ListSystemRoles(ctx context.Context) ([]Role, error) {
-	rows, err := q.db.Query(ctx, ListSystemRoles)
+	rows, err := q.db.QueryContext(ctx, ListSystemRoles)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +159,9 @@ func (q *Queries) ListSystemRoles(ctx context.Context) ([]Role, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -172,13 +180,13 @@ RETURNING id, name, description, permissions, is_system, created_at, updated_at
 `
 
 type UpdateRoleParams struct {
-	Description *string   `db:"description" json:"description"`
-	Permissions []byte    `db:"permissions" json:"permissions"`
-	ID          uuid.UUID `db:"id" json:"id"`
+	Description sql.NullString        `db:"description" json:"description"`
+	Permissions pqtype.NullRawMessage `db:"permissions" json:"permissions"`
+	ID          uuid.UUID             `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error) {
-	row := q.db.QueryRow(ctx, UpdateRole, arg.Description, arg.Permissions, arg.ID)
+	row := q.db.QueryRowContext(ctx, UpdateRole, arg.Description, arg.Permissions, arg.ID)
 	var i Role
 	err := row.Scan(
 		&i.ID,

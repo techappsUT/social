@@ -37,6 +37,10 @@ import (
 )
 
 // ============================================================================
+// CONFIGURATION TYPES
+// ============================================================================
+
+// ============================================================================
 // APPLICATION CONTAINER
 // ============================================================================
 
@@ -152,7 +156,8 @@ func (app *App) initializeCleanArchitecture() error {
 		app.Config.JWT.RefreshSecret,
 	)
 
-	emailConfig := EmailConfig{
+	// Convert main.EmailConfig to services.EmailConfig
+	emailConfig := services.EmailConfig{
 		Provider:    app.Config.Email.Provider,
 		APIKey:      app.Config.Email.APIKey,
 		FromAddress: app.Config.Email.FromAddress,

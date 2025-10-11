@@ -7,9 +7,9 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const CountSocialTokensByTeam = `-- name: CountSocialTokensByTeam :one
@@ -21,7 +21,7 @@ WHERE sa.team_id = $1
 `
 
 func (q *Queries) CountSocialTokensByTeam(ctx context.Context, teamID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, CountSocialTokensByTeam, teamID)
+	row := q.db.QueryRowContext(ctx, CountSocialTokensByTeam, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -43,18 +43,18 @@ RETURNING id, social_account_id, access_token, refresh_token, token_type, expire
 `
 
 type CreateSocialTokenParams struct {
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	AccessToken     string             `db:"access_token" json:"access_token"`
-	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
-	TokenType       *string            `db:"token_type" json:"token_type"`
-	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	Scope           *string            `db:"scope" json:"scope"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
+	AccessToken     string         `db:"access_token" json:"access_token"`
+	RefreshToken    sql.NullString `db:"refresh_token" json:"refresh_token"`
+	TokenType       sql.NullString `db:"token_type" json:"token_type"`
+	ExpiresAt       sql.NullTime   `db:"expires_at" json:"expires_at"`
+	Scope           sql.NullString `db:"scope" json:"scope"`
 }
 
 // path: backend/sql/social_tokens.sql
 // 🔄 REFACTORED - Fixed syntax and removed duplicates
 func (q *Queries) CreateSocialToken(ctx context.Context, arg CreateSocialTokenParams) (SocialToken, error) {
-	row := q.db.QueryRow(ctx, CreateSocialToken,
+	row := q.db.QueryRowContext(ctx, CreateSocialToken,
 		arg.SocialAccountID,
 		arg.AccessToken,
 		arg.RefreshToken,
@@ -83,7 +83,7 @@ WHERE social_account_id = $1
 `
 
 func (q *Queries) DeleteSocialToken(ctx context.Context, socialAccountID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, DeleteSocialToken, socialAccountID)
+	_, err := q.db.ExecContext(ctx, DeleteSocialToken, socialAccountID)
 	return err
 }
 
@@ -104,23 +104,23 @@ ORDER BY st.expires_at ASC
 `
 
 type GetExpiringSocialTokensRow struct {
-	ID              uuid.UUID          `db:"id" json:"id"`
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	AccessToken     string             `db:"access_token" json:"access_token"`
-	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
-	TokenType       *string            `db:"token_type" json:"token_type"`
-	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	Scope           *string            `db:"scope" json:"scope"`
-	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Platform        SocialPlatform     `db:"platform" json:"platform"`
-	PlatformUserID  string             `db:"platform_user_id" json:"platform_user_id"`
-	Username        *string            `db:"username" json:"username"`
-	TeamID          uuid.UUID          `db:"team_id" json:"team_id"`
+	ID              uuid.UUID      `db:"id" json:"id"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
+	AccessToken     string         `db:"access_token" json:"access_token"`
+	RefreshToken    sql.NullString `db:"refresh_token" json:"refresh_token"`
+	TokenType       sql.NullString `db:"token_type" json:"token_type"`
+	ExpiresAt       sql.NullTime   `db:"expires_at" json:"expires_at"`
+	Scope           sql.NullString `db:"scope" json:"scope"`
+	CreatedAt       sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt       sql.NullTime   `db:"updated_at" json:"updated_at"`
+	Platform        SocialPlatform `db:"platform" json:"platform"`
+	PlatformUserID  string         `db:"platform_user_id" json:"platform_user_id"`
+	Username        sql.NullString `db:"username" json:"username"`
+	TeamID          uuid.UUID      `db:"team_id" json:"team_id"`
 }
 
 func (q *Queries) GetExpiringSocialTokens(ctx context.Context) ([]GetExpiringSocialTokensRow, error) {
-	rows, err := q.db.Query(ctx, GetExpiringSocialTokens)
+	rows, err := q.db.QueryContext(ctx, GetExpiringSocialTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +147,9 @@ func (q *Queries) GetExpiringSocialTokens(ctx context.Context) ([]GetExpiringSoc
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -159,7 +162,7 @@ WHERE social_account_id = $1
 `
 
 func (q *Queries) GetSocialTokenByAccountID(ctx context.Context, socialAccountID uuid.UUID) (SocialToken, error) {
-	row := q.db.QueryRow(ctx, GetSocialTokenByAccountID, socialAccountID)
+	row := q.db.QueryRowContext(ctx, GetSocialTokenByAccountID, socialAccountID)
 	var i SocialToken
 	err := row.Scan(
 		&i.ID,
@@ -188,16 +191,16 @@ WHERE social_account_id = $6
 `
 
 type UpdateSocialTokenParams struct {
-	AccessToken     *string            `db:"access_token" json:"access_token"`
-	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
-	TokenType       *string            `db:"token_type" json:"token_type"`
-	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	Scope           *string            `db:"scope" json:"scope"`
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
+	AccessToken     sql.NullString `db:"access_token" json:"access_token"`
+	RefreshToken    sql.NullString `db:"refresh_token" json:"refresh_token"`
+	TokenType       sql.NullString `db:"token_type" json:"token_type"`
+	ExpiresAt       sql.NullTime   `db:"expires_at" json:"expires_at"`
+	Scope           sql.NullString `db:"scope" json:"scope"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
 }
 
 func (q *Queries) UpdateSocialToken(ctx context.Context, arg UpdateSocialTokenParams) error {
-	_, err := q.db.Exec(ctx, UpdateSocialToken,
+	_, err := q.db.ExecContext(ctx, UpdateSocialToken,
 		arg.AccessToken,
 		arg.RefreshToken,
 		arg.TokenType,
@@ -219,14 +222,14 @@ WHERE social_account_id = $1
 `
 
 type UpdateSocialTokensParams struct {
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	AccessToken     string             `db:"access_token" json:"access_token"`
-	RefreshToken    *string            `db:"refresh_token" json:"refresh_token"`
-	ExpiresAt       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
+	AccessToken     string         `db:"access_token" json:"access_token"`
+	RefreshToken    sql.NullString `db:"refresh_token" json:"refresh_token"`
+	ExpiresAt       sql.NullTime   `db:"expires_at" json:"expires_at"`
 }
 
 func (q *Queries) UpdateSocialTokens(ctx context.Context, arg UpdateSocialTokensParams) error {
-	_, err := q.db.Exec(ctx, UpdateSocialTokens,
+	_, err := q.db.ExecContext(ctx, UpdateSocialTokens,
 		arg.SocialAccountID,
 		arg.AccessToken,
 		arg.RefreshToken,

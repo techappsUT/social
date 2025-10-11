@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CreateAnalyticsEvent = `-- name: CreateAnalyticsEvent :one
@@ -26,16 +27,16 @@ RETURNING id, post_id, event_type, event_value, event_metadata, recorded_at
 `
 
 type CreateAnalyticsEventParams struct {
-	PostID        uuid.UUID `db:"post_id" json:"post_id"`
-	EventType     EventType `db:"event_type" json:"event_type"`
-	EventValue    *int32    `db:"event_value" json:"event_value"`
-	EventMetadata []byte    `db:"event_metadata" json:"event_metadata"`
+	PostID        uuid.UUID             `db:"post_id" json:"post_id"`
+	EventType     EventType             `db:"event_type" json:"event_type"`
+	EventValue    sql.NullInt32         `db:"event_value" json:"event_value"`
+	EventMetadata pqtype.NullRawMessage `db:"event_metadata" json:"event_metadata"`
 }
 
 // path: backend/sql/analytics.sql
 // 🔄 REFACTORED - Match actual schema (recorded_at, no team_id, no event_timestamp)
 func (q *Queries) CreateAnalyticsEvent(ctx context.Context, arg CreateAnalyticsEventParams) (AnalyticsEvent, error) {
-	row := q.db.QueryRow(ctx, CreateAnalyticsEvent,
+	row := q.db.QueryRowContext(ctx, CreateAnalyticsEvent,
 		arg.PostID,
 		arg.EventType,
 		arg.EventValue,
@@ -64,15 +65,15 @@ LIMIT $4 OFFSET $5
 `
 
 type GetAnalyticsEventsByDateRangeParams struct {
-	TeamID       uuid.UUID          `db:"team_id" json:"team_id"`
-	RecordedAt   pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
-	RecordedAt_2 pgtype.Timestamptz `db:"recorded_at_2" json:"recorded_at_2"`
-	Limit        int32              `db:"limit" json:"limit"`
-	Offset       int32              `db:"offset" json:"offset"`
+	TeamID       uuid.UUID    `db:"team_id" json:"team_id"`
+	RecordedAt   sql.NullTime `db:"recorded_at" json:"recorded_at"`
+	RecordedAt_2 sql.NullTime `db:"recorded_at_2" json:"recorded_at_2"`
+	Limit        int32        `db:"limit" json:"limit"`
+	Offset       int32        `db:"offset" json:"offset"`
 }
 
 func (q *Queries) GetAnalyticsEventsByDateRange(ctx context.Context, arg GetAnalyticsEventsByDateRangeParams) ([]AnalyticsEvent, error) {
-	rows, err := q.db.Query(ctx, GetAnalyticsEventsByDateRange,
+	rows, err := q.db.QueryContext(ctx, GetAnalyticsEventsByDateRange,
 		arg.TeamID,
 		arg.RecordedAt,
 		arg.RecordedAt_2,
@@ -98,6 +99,9 @@ func (q *Queries) GetAnalyticsEventsByDateRange(ctx context.Context, arg GetAnal
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -111,7 +115,7 @@ ORDER BY recorded_at DESC
 `
 
 func (q *Queries) GetAnalyticsEventsByPost(ctx context.Context, postID uuid.UUID) ([]AnalyticsEvent, error) {
-	rows, err := q.db.Query(ctx, GetAnalyticsEventsByPost, postID)
+	rows, err := q.db.QueryContext(ctx, GetAnalyticsEventsByPost, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +134,9 @@ func (q *Queries) GetAnalyticsEventsByPost(ctx context.Context, postID uuid.UUID
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -151,9 +158,9 @@ WHERE p.team_id = $1
 `
 
 type GetAnalyticsSummaryByTeamParams struct {
-	TeamID       uuid.UUID          `db:"team_id" json:"team_id"`
-	RecordedAt   pgtype.Timestamptz `db:"recorded_at" json:"recorded_at"`
-	RecordedAt_2 pgtype.Timestamptz `db:"recorded_at_2" json:"recorded_at_2"`
+	TeamID       uuid.UUID    `db:"team_id" json:"team_id"`
+	RecordedAt   sql.NullTime `db:"recorded_at" json:"recorded_at"`
+	RecordedAt_2 sql.NullTime `db:"recorded_at_2" json:"recorded_at_2"`
 }
 
 type GetAnalyticsSummaryByTeamRow struct {
@@ -165,7 +172,7 @@ type GetAnalyticsSummaryByTeamRow struct {
 }
 
 func (q *Queries) GetAnalyticsSummaryByTeam(ctx context.Context, arg GetAnalyticsSummaryByTeamParams) (GetAnalyticsSummaryByTeamRow, error) {
-	row := q.db.QueryRow(ctx, GetAnalyticsSummaryByTeam, arg.TeamID, arg.RecordedAt, arg.RecordedAt_2)
+	row := q.db.QueryRowContext(ctx, GetAnalyticsSummaryByTeam, arg.TeamID, arg.RecordedAt, arg.RecordedAt_2)
 	var i GetAnalyticsSummaryByTeamRow
 	err := row.Scan(
 		&i.TotalPosts,
@@ -195,7 +202,7 @@ type GetEventCountByTypeRow struct {
 }
 
 func (q *Queries) GetEventCountByType(ctx context.Context, postID uuid.UUID) ([]GetEventCountByTypeRow, error) {
-	rows, err := q.db.Query(ctx, GetEventCountByType, postID)
+	rows, err := q.db.QueryContext(ctx, GetEventCountByType, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +214,9 @@ func (q *Queries) GetEventCountByType(ctx context.Context, postID uuid.UUID) ([]
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

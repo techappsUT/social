@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CountTeamMembers = `-- name: CountTeamMembers :one
@@ -20,7 +21,7 @@ WHERE team_id = $1
 `
 
 func (q *Queries) CountTeamMembers(ctx context.Context, teamID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, CountTeamMembers, teamID)
+	row := q.db.QueryRowContext(ctx, CountTeamMembers, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -41,17 +42,17 @@ RETURNING id, name, slug, avatar_url, settings, is_active, created_by, created_a
 `
 
 type CreateTeamParams struct {
-	Name      string      `db:"name" json:"name"`
-	Slug      string      `db:"slug" json:"slug"`
-	AvatarUrl *string     `db:"avatar_url" json:"avatar_url"`
-	Settings  []byte      `db:"settings" json:"settings"`
-	CreatedBy pgtype.UUID `db:"created_by" json:"created_by"`
+	Name      string                `db:"name" json:"name"`
+	Slug      string                `db:"slug" json:"slug"`
+	AvatarUrl sql.NullString        `db:"avatar_url" json:"avatar_url"`
+	Settings  pqtype.NullRawMessage `db:"settings" json:"settings"`
+	CreatedBy uuid.NullUUID         `db:"created_by" json:"created_by"`
 }
 
 // path: backend/sql/teams.sql
 // 🔄 REFACTORED - Removed duplicate team membership queries
 func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error) {
-	row := q.db.QueryRow(ctx, CreateTeam,
+	row := q.db.QueryRowContext(ctx, CreateTeam,
 		arg.Name,
 		arg.Slug,
 		arg.AvatarUrl,
@@ -80,7 +81,7 @@ WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetTeamByID(ctx context.Context, id uuid.UUID) (Team, error) {
-	row := q.db.QueryRow(ctx, GetTeamByID, id)
+	row := q.db.QueryRowContext(ctx, GetTeamByID, id)
 	var i Team
 	err := row.Scan(
 		&i.ID,
@@ -103,7 +104,7 @@ WHERE slug = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetTeamBySlug(ctx context.Context, slug string) (Team, error) {
-	row := q.db.QueryRow(ctx, GetTeamBySlug, slug)
+	row := q.db.QueryRowContext(ctx, GetTeamBySlug, slug)
 	var i Team
 	err := row.Scan(
 		&i.ID,
@@ -131,7 +132,7 @@ ORDER BY t.created_at DESC
 `
 
 func (q *Queries) ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]Team, error) {
-	rows, err := q.db.Query(ctx, ListTeamsByUser, userID)
+	rows, err := q.db.QueryContext(ctx, ListTeamsByUser, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +156,9 @@ func (q *Queries) ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]Team
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -170,7 +174,7 @@ WHERE id = $1
 `
 
 func (q *Queries) SoftDeleteTeam(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, SoftDeleteTeam, id)
+	_, err := q.db.ExecContext(ctx, SoftDeleteTeam, id)
 	return err
 }
 
@@ -187,15 +191,15 @@ RETURNING id, name, slug, avatar_url, settings, is_active, created_by, created_a
 `
 
 type UpdateTeamParams struct {
-	Name      *string   `db:"name" json:"name"`
-	Slug      *string   `db:"slug" json:"slug"`
-	AvatarUrl *string   `db:"avatar_url" json:"avatar_url"`
-	Settings  []byte    `db:"settings" json:"settings"`
-	ID        uuid.UUID `db:"id" json:"id"`
+	Name      sql.NullString        `db:"name" json:"name"`
+	Slug      sql.NullString        `db:"slug" json:"slug"`
+	AvatarUrl sql.NullString        `db:"avatar_url" json:"avatar_url"`
+	Settings  pqtype.NullRawMessage `db:"settings" json:"settings"`
+	ID        uuid.UUID             `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, error) {
-	row := q.db.QueryRow(ctx, UpdateTeam,
+	row := q.db.QueryRowContext(ctx, UpdateTeam,
 		arg.Name,
 		arg.Slug,
 		arg.AvatarUrl,

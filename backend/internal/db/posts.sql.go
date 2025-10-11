@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const CountPostsByTeam = `-- name: CountPostsByTeam :one
@@ -19,7 +20,7 @@ WHERE team_id = $1
 `
 
 func (q *Queries) CountPostsByTeam(ctx context.Context, teamID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, CountPostsByTeam, teamID)
+	row := q.db.QueryRowContext(ctx, CountPostsByTeam, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -33,13 +34,13 @@ WHERE team_id = $1
 `
 
 type CountPostsByTeamAndDateRangeParams struct {
-	TeamID        uuid.UUID          `db:"team_id" json:"team_id"`
-	PublishedAt   pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	PublishedAt_2 pgtype.Timestamptz `db:"published_at_2" json:"published_at_2"`
+	TeamID        uuid.UUID    `db:"team_id" json:"team_id"`
+	PublishedAt   sql.NullTime `db:"published_at" json:"published_at"`
+	PublishedAt_2 sql.NullTime `db:"published_at_2" json:"published_at_2"`
 }
 
 func (q *Queries) CountPostsByTeamAndDateRange(ctx context.Context, arg CountPostsByTeamAndDateRangeParams) (int64, error) {
-	row := q.db.QueryRow(ctx, CountPostsByTeamAndDateRange, arg.TeamID, arg.PublishedAt, arg.PublishedAt_2)
+	row := q.db.QueryRowContext(ctx, CountPostsByTeamAndDateRange, arg.TeamID, arg.PublishedAt, arg.PublishedAt_2)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -62,19 +63,19 @@ RETURNING id, scheduled_post_id, team_id, social_account_id, platform_post_id, p
 `
 
 type CreatePostParams struct {
-	ScheduledPostID pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID          uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID  *string            `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content         string             `db:"content" json:"content"`
-	PublishedAt     pgtype.Timestamptz `db:"published_at" json:"published_at"`
+	ScheduledPostID uuid.NullUUID  `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID          uuid.UUID      `db:"team_id" json:"team_id"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID  sql.NullString `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl sql.NullString `db:"platform_post_url" json:"platform_post_url"`
+	Content         string         `db:"content" json:"content"`
+	PublishedAt     sql.NullTime   `db:"published_at" json:"published_at"`
 }
 
 // path: backend/sql/posts.sql
 // 🔄 REFACTORED - Schema has impressions in analytics_events, not posts table
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, error) {
-	row := q.db.QueryRow(ctx, CreatePost,
+	row := q.db.QueryRowContext(ctx, CreatePost,
 		arg.ScheduledPostID,
 		arg.TeamID,
 		arg.SocialAccountID,
@@ -106,7 +107,7 @@ SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, plat
 `
 
 func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
-	row := q.db.QueryRow(ctx, GetPostByID, id)
+	row := q.db.QueryRowContext(ctx, GetPostByID, id)
 	var i Post
 	err := row.Scan(
 		&i.ID,
@@ -131,12 +132,12 @@ WHERE social_account_id = $1 AND platform_post_id = $2
 `
 
 type GetPostByPlatformIDParams struct {
-	SocialAccountID uuid.UUID `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID  *string   `db:"platform_post_id" json:"platform_post_id"`
+	SocialAccountID uuid.UUID      `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID  sql.NullString `db:"platform_post_id" json:"platform_post_id"`
 }
 
 func (q *Queries) GetPostByPlatformID(ctx context.Context, arg GetPostByPlatformIDParams) (Post, error) {
-	row := q.db.QueryRow(ctx, GetPostByPlatformID, arg.SocialAccountID, arg.PlatformPostID)
+	row := q.db.QueryRowContext(ctx, GetPostByPlatformID, arg.SocialAccountID, arg.PlatformPostID)
 	var i Post
 	err := row.Scan(
 		&i.ID,
@@ -159,8 +160,8 @@ const GetPostByScheduledPostID = `-- name: GetPostByScheduledPostID :one
 SELECT id, scheduled_post_id, team_id, social_account_id, platform_post_id, platform_post_url, content, published_at, metrics, last_metrics_fetch_at, created_at, updated_at FROM posts WHERE scheduled_post_id = $1
 `
 
-func (q *Queries) GetPostByScheduledPostID(ctx context.Context, scheduledPostID pgtype.UUID) (Post, error) {
-	row := q.db.QueryRow(ctx, GetPostByScheduledPostID, scheduledPostID)
+func (q *Queries) GetPostByScheduledPostID(ctx context.Context, scheduledPostID uuid.NullUUID) (Post, error) {
+	row := q.db.QueryRowContext(ctx, GetPostByScheduledPostID, scheduledPostID)
 	var i Post
 	err := row.Scan(
 		&i.ID,
@@ -193,32 +194,32 @@ LIMIT $4 OFFSET $5
 `
 
 type ListPostsByTeamParams struct {
-	TeamID        uuid.UUID          `db:"team_id" json:"team_id"`
-	PublishedAt   pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	PublishedAt_2 pgtype.Timestamptz `db:"published_at_2" json:"published_at_2"`
-	Limit         int32              `db:"limit" json:"limit"`
-	Offset        int32              `db:"offset" json:"offset"`
+	TeamID        uuid.UUID    `db:"team_id" json:"team_id"`
+	PublishedAt   sql.NullTime `db:"published_at" json:"published_at"`
+	PublishedAt_2 sql.NullTime `db:"published_at_2" json:"published_at_2"`
+	Limit         int32        `db:"limit" json:"limit"`
+	Offset        int32        `db:"offset" json:"offset"`
 }
 
 type ListPostsByTeamRow struct {
-	ID                 uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID    pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID             uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID    uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID     *string            `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl    *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content            string             `db:"content" json:"content"`
-	PublishedAt        pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	Metrics            []byte             `db:"metrics" json:"metrics"`
-	LastMetricsFetchAt pgtype.Timestamptz `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
-	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Platform           SocialPlatform     `db:"platform" json:"platform"`
-	Username           *string            `db:"username" json:"username"`
+	ID                 uuid.UUID             `db:"id" json:"id"`
+	ScheduledPostID    uuid.NullUUID         `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID             uuid.UUID             `db:"team_id" json:"team_id"`
+	SocialAccountID    uuid.UUID             `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID     sql.NullString        `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl    sql.NullString        `db:"platform_post_url" json:"platform_post_url"`
+	Content            string                `db:"content" json:"content"`
+	PublishedAt        sql.NullTime          `db:"published_at" json:"published_at"`
+	Metrics            pqtype.NullRawMessage `db:"metrics" json:"metrics"`
+	LastMetricsFetchAt sql.NullTime          `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
+	CreatedAt          sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt          sql.NullTime          `db:"updated_at" json:"updated_at"`
+	Platform           SocialPlatform        `db:"platform" json:"platform"`
+	Username           sql.NullString        `db:"username" json:"username"`
 }
 
 func (q *Queries) ListPostsByTeam(ctx context.Context, arg ListPostsByTeamParams) ([]ListPostsByTeamRow, error) {
-	rows, err := q.db.Query(ctx, ListPostsByTeam,
+	rows, err := q.db.QueryContext(ctx, ListPostsByTeam,
 		arg.TeamID,
 		arg.PublishedAt,
 		arg.PublishedAt_2,
@@ -252,6 +253,9 @@ func (q *Queries) ListPostsByTeam(ctx context.Context, arg ListPostsByTeamParams
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -276,24 +280,24 @@ type ListRecentPostsByTeamParams struct {
 }
 
 type ListRecentPostsByTeamRow struct {
-	ID                 uuid.UUID          `db:"id" json:"id"`
-	ScheduledPostID    pgtype.UUID        `db:"scheduled_post_id" json:"scheduled_post_id"`
-	TeamID             uuid.UUID          `db:"team_id" json:"team_id"`
-	SocialAccountID    uuid.UUID          `db:"social_account_id" json:"social_account_id"`
-	PlatformPostID     *string            `db:"platform_post_id" json:"platform_post_id"`
-	PlatformPostUrl    *string            `db:"platform_post_url" json:"platform_post_url"`
-	Content            string             `db:"content" json:"content"`
-	PublishedAt        pgtype.Timestamptz `db:"published_at" json:"published_at"`
-	Metrics            []byte             `db:"metrics" json:"metrics"`
-	LastMetricsFetchAt pgtype.Timestamptz `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
-	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Platform           SocialPlatform     `db:"platform" json:"platform"`
-	Username           *string            `db:"username" json:"username"`
+	ID                 uuid.UUID             `db:"id" json:"id"`
+	ScheduledPostID    uuid.NullUUID         `db:"scheduled_post_id" json:"scheduled_post_id"`
+	TeamID             uuid.UUID             `db:"team_id" json:"team_id"`
+	SocialAccountID    uuid.UUID             `db:"social_account_id" json:"social_account_id"`
+	PlatformPostID     sql.NullString        `db:"platform_post_id" json:"platform_post_id"`
+	PlatformPostUrl    sql.NullString        `db:"platform_post_url" json:"platform_post_url"`
+	Content            string                `db:"content" json:"content"`
+	PublishedAt        sql.NullTime          `db:"published_at" json:"published_at"`
+	Metrics            pqtype.NullRawMessage `db:"metrics" json:"metrics"`
+	LastMetricsFetchAt sql.NullTime          `db:"last_metrics_fetch_at" json:"last_metrics_fetch_at"`
+	CreatedAt          sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt          sql.NullTime          `db:"updated_at" json:"updated_at"`
+	Platform           SocialPlatform        `db:"platform" json:"platform"`
+	Username           sql.NullString        `db:"username" json:"username"`
 }
 
 func (q *Queries) ListRecentPostsByTeam(ctx context.Context, arg ListRecentPostsByTeamParams) ([]ListRecentPostsByTeamRow, error) {
-	rows, err := q.db.Query(ctx, ListRecentPostsByTeam, arg.TeamID, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, ListRecentPostsByTeam, arg.TeamID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +324,9 @@ func (q *Queries) ListRecentPostsByTeam(ctx context.Context, arg ListRecentPosts
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

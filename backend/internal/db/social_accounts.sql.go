@@ -7,9 +7,10 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const GetSocialAccountByID = `-- name: GetSocialAccountByID :one
@@ -18,7 +19,7 @@ WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetSocialAccountByID(ctx context.Context, id uuid.UUID) (SocialAccount, error) {
-	row := q.db.QueryRow(ctx, GetSocialAccountByID, id)
+	row := q.db.QueryRowContext(ctx, GetSocialAccountByID, id)
 	var i SocialAccount
 	err := row.Scan(
 		&i.ID,
@@ -58,26 +59,26 @@ type GetSocialAccountWithTokenRow struct {
 	TeamID         uuid.UUID               `db:"team_id" json:"team_id"`
 	Platform       SocialPlatform          `db:"platform" json:"platform"`
 	PlatformUserID string                  `db:"platform_user_id" json:"platform_user_id"`
-	Username       *string                 `db:"username" json:"username"`
-	DisplayName    *string                 `db:"display_name" json:"display_name"`
-	AvatarUrl      *string                 `db:"avatar_url" json:"avatar_url"`
-	ProfileUrl     *string                 `db:"profile_url" json:"profile_url"`
-	AccountType    *string                 `db:"account_type" json:"account_type"`
+	Username       sql.NullString          `db:"username" json:"username"`
+	DisplayName    sql.NullString          `db:"display_name" json:"display_name"`
+	AvatarUrl      sql.NullString          `db:"avatar_url" json:"avatar_url"`
+	ProfileUrl     sql.NullString          `db:"profile_url" json:"profile_url"`
+	AccountType    sql.NullString          `db:"account_type" json:"account_type"`
 	Status         NullSocialAccountStatus `db:"status" json:"status"`
-	Metadata       []byte                  `db:"metadata" json:"metadata"`
-	ConnectedBy    pgtype.UUID             `db:"connected_by" json:"connected_by"`
-	ConnectedAt    pgtype.Timestamptz      `db:"connected_at" json:"connected_at"`
-	LastSyncedAt   pgtype.Timestamptz      `db:"last_synced_at" json:"last_synced_at"`
-	CreatedAt      pgtype.Timestamptz      `db:"created_at" json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz      `db:"updated_at" json:"updated_at"`
-	DeletedAt      pgtype.Timestamptz      `db:"deleted_at" json:"deleted_at"`
-	AccessToken    *string                 `db:"access_token" json:"access_token"`
-	RefreshToken   *string                 `db:"refresh_token" json:"refresh_token"`
-	TokenExpiresAt pgtype.Timestamptz      `db:"token_expires_at" json:"token_expires_at"`
+	Metadata       pqtype.NullRawMessage   `db:"metadata" json:"metadata"`
+	ConnectedBy    uuid.NullUUID           `db:"connected_by" json:"connected_by"`
+	ConnectedAt    sql.NullTime            `db:"connected_at" json:"connected_at"`
+	LastSyncedAt   sql.NullTime            `db:"last_synced_at" json:"last_synced_at"`
+	CreatedAt      sql.NullTime            `db:"created_at" json:"created_at"`
+	UpdatedAt      sql.NullTime            `db:"updated_at" json:"updated_at"`
+	DeletedAt      sql.NullTime            `db:"deleted_at" json:"deleted_at"`
+	AccessToken    sql.NullString          `db:"access_token" json:"access_token"`
+	RefreshToken   sql.NullString          `db:"refresh_token" json:"refresh_token"`
+	TokenExpiresAt sql.NullTime            `db:"token_expires_at" json:"token_expires_at"`
 }
 
 func (q *Queries) GetSocialAccountWithToken(ctx context.Context, id uuid.UUID) (GetSocialAccountWithTokenRow, error) {
-	row := q.db.QueryRow(ctx, GetSocialAccountWithToken, id)
+	row := q.db.QueryRowContext(ctx, GetSocialAccountWithToken, id)
 	var i GetSocialAccountWithTokenRow
 	err := row.Scan(
 		&i.ID,
@@ -128,19 +129,19 @@ type LinkSocialAccountParams struct {
 	TeamID         uuid.UUID               `db:"team_id" json:"team_id"`
 	Platform       SocialPlatform          `db:"platform" json:"platform"`
 	PlatformUserID string                  `db:"platform_user_id" json:"platform_user_id"`
-	Username       *string                 `db:"username" json:"username"`
-	DisplayName    *string                 `db:"display_name" json:"display_name"`
-	AvatarUrl      *string                 `db:"avatar_url" json:"avatar_url"`
-	ProfileUrl     *string                 `db:"profile_url" json:"profile_url"`
-	AccountType    *string                 `db:"account_type" json:"account_type"`
+	Username       sql.NullString          `db:"username" json:"username"`
+	DisplayName    sql.NullString          `db:"display_name" json:"display_name"`
+	AvatarUrl      sql.NullString          `db:"avatar_url" json:"avatar_url"`
+	ProfileUrl     sql.NullString          `db:"profile_url" json:"profile_url"`
+	AccountType    sql.NullString          `db:"account_type" json:"account_type"`
 	Status         NullSocialAccountStatus `db:"status" json:"status"`
-	Metadata       []byte                  `db:"metadata" json:"metadata"`
-	ConnectedBy    pgtype.UUID             `db:"connected_by" json:"connected_by"`
+	Metadata       pqtype.NullRawMessage   `db:"metadata" json:"metadata"`
+	ConnectedBy    uuid.NullUUID           `db:"connected_by" json:"connected_by"`
 }
 
 // path: backend/sql/social_accounts.sql
 func (q *Queries) LinkSocialAccount(ctx context.Context, arg LinkSocialAccountParams) (SocialAccount, error) {
-	row := q.db.QueryRow(ctx, LinkSocialAccount,
+	row := q.db.QueryRowContext(ctx, LinkSocialAccount,
 		arg.TeamID,
 		arg.Platform,
 		arg.PlatformUserID,
@@ -190,7 +191,7 @@ type ListSocialAccountsByPlatformParams struct {
 }
 
 func (q *Queries) ListSocialAccountsByPlatform(ctx context.Context, arg ListSocialAccountsByPlatformParams) ([]SocialAccount, error) {
-	rows, err := q.db.Query(ctx, ListSocialAccountsByPlatform, arg.TeamID, arg.Platform)
+	rows, err := q.db.QueryContext(ctx, ListSocialAccountsByPlatform, arg.TeamID, arg.Platform)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +221,9 @@ func (q *Queries) ListSocialAccountsByPlatform(ctx context.Context, arg ListSoci
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -234,7 +238,7 @@ ORDER BY platform ASC, created_at ASC
 `
 
 func (q *Queries) ListSocialAccountsByTeam(ctx context.Context, teamID uuid.UUID) ([]SocialAccount, error) {
-	rows, err := q.db.Query(ctx, ListSocialAccountsByTeam, teamID)
+	rows, err := q.db.QueryContext(ctx, ListSocialAccountsByTeam, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +268,9 @@ func (q *Queries) ListSocialAccountsByTeam(ctx context.Context, teamID uuid.UUID
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -280,7 +287,7 @@ WHERE id = $1
 `
 
 func (q *Queries) SoftDeleteSocialAccount(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, SoftDeleteSocialAccount, id)
+	_, err := q.db.ExecContext(ctx, SoftDeleteSocialAccount, id)
 	return err
 }
 
@@ -297,15 +304,15 @@ WHERE id = $5
 `
 
 type UpdateSocialAccountMetadataParams struct {
-	Username    *string   `db:"username" json:"username"`
-	DisplayName *string   `db:"display_name" json:"display_name"`
-	AvatarUrl   *string   `db:"avatar_url" json:"avatar_url"`
-	Metadata    []byte    `db:"metadata" json:"metadata"`
-	ID          uuid.UUID `db:"id" json:"id"`
+	Username    sql.NullString        `db:"username" json:"username"`
+	DisplayName sql.NullString        `db:"display_name" json:"display_name"`
+	AvatarUrl   sql.NullString        `db:"avatar_url" json:"avatar_url"`
+	Metadata    pqtype.NullRawMessage `db:"metadata" json:"metadata"`
+	ID          uuid.UUID             `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateSocialAccountMetadata(ctx context.Context, arg UpdateSocialAccountMetadataParams) error {
-	_, err := q.db.Exec(ctx, UpdateSocialAccountMetadata,
+	_, err := q.db.ExecContext(ctx, UpdateSocialAccountMetadata,
 		arg.Username,
 		arg.DisplayName,
 		arg.AvatarUrl,
@@ -327,10 +334,10 @@ WHERE id = $1
 type UpdateSocialAccountStatusParams struct {
 	ID       uuid.UUID               `db:"id" json:"id"`
 	Status   NullSocialAccountStatus `db:"status" json:"status"`
-	Metadata []byte                  `db:"metadata" json:"metadata"`
+	Metadata pqtype.NullRawMessage   `db:"metadata" json:"metadata"`
 }
 
 func (q *Queries) UpdateSocialAccountStatus(ctx context.Context, arg UpdateSocialAccountStatusParams) error {
-	_, err := q.db.Exec(ctx, UpdateSocialAccountStatus, arg.ID, arg.Status, arg.Metadata)
+	_, err := q.db.ExecContext(ctx, UpdateSocialAccountStatus, arg.ID, arg.Status, arg.Metadata)
 	return err
 }

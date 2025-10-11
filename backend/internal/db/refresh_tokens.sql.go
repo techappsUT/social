@@ -33,7 +33,7 @@ type CreateRefreshTokenParams struct {
 // path: backend/sql/refresh_tokens.sql
 // 🆕 NEW - JWT refresh token operations
 func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error) {
-	row := q.db.QueryRow(ctx, CreateRefreshToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	row := q.db.QueryRowContext(ctx, CreateRefreshToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
 	var i RefreshToken
 	err := row.Scan(
 		&i.ID,
@@ -53,7 +53,7 @@ WHERE expires_at < NOW()
 `
 
 func (q *Queries) DeleteExpiredTokens(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, DeleteExpiredTokens)
+	_, err := q.db.ExecContext(ctx, DeleteExpiredTokens)
 	return err
 }
 
@@ -65,7 +65,7 @@ WHERE token_hash = $1
 `
 
 func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error) {
-	row := q.db.QueryRow(ctx, GetRefreshTokenByHash, tokenHash)
+	row := q.db.QueryRowContext(ctx, GetRefreshTokenByHash, tokenHash)
 	var i RefreshToken
 	err := row.Scan(
 		&i.ID,
@@ -85,7 +85,7 @@ WHERE user_id = $1 AND revoked = FALSE
 `
 
 func (q *Queries) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, RevokeAllUserTokens, userID)
+	_, err := q.db.ExecContext(ctx, RevokeAllUserTokens, userID)
 	return err
 }
 
@@ -96,6 +96,6 @@ WHERE token_hash = $1
 `
 
 func (q *Queries) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
-	_, err := q.db.Exec(ctx, RevokeRefreshToken, tokenHash)
+	_, err := q.db.ExecContext(ctx, RevokeRefreshToken, tokenHash)
 	return err
 }

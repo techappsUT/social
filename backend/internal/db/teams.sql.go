@@ -13,6 +13,57 @@ import (
 	"github.com/sqlc-dev/pqtype"
 )
 
+const AddTeamMember = `-- name: AddTeamMember :one
+INSERT INTO team_memberships (
+    team_id,
+    user_id,
+    role_id
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, team_id, user_id, role_id, invited_by, invitation_token, invitation_accepted_at, is_active, created_at, updated_at, deleted_at
+`
+
+type AddTeamMemberParams struct {
+	TeamID uuid.UUID `db:"team_id" json:"team_id"`
+	UserID uuid.UUID `db:"user_id" json:"user_id"`
+	RoleID uuid.UUID `db:"role_id" json:"role_id"`
+}
+
+func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMembership, error) {
+	row := q.db.QueryRowContext(ctx, AddTeamMember, arg.TeamID, arg.UserID, arg.RoleID)
+	var i TeamMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.UserID,
+		&i.RoleID,
+		&i.InvitedBy,
+		&i.InvitationToken,
+		&i.InvitationAcceptedAt,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const CountAdminsInTeam = `-- name: CountAdminsInTeam :one
+SELECT COUNT(*) FROM team_memberships tm
+INNER JOIN roles r ON tm.role_id = r.id
+WHERE tm.team_id = $1 
+  AND r.name IN ('owner', 'admin')
+  AND tm.deleted_at IS NULL
+`
+
+func (q *Queries) CountAdminsInTeam(ctx context.Context, teamID uuid.UUID) (int64, error) {
+	row := q.db.QueryRowContext(ctx, CountAdminsInTeam, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const CountTeamMembers = `-- name: CountTeamMembers :one
 SELECT COUNT(*)
 FROM team_memberships
@@ -22,6 +73,21 @@ WHERE team_id = $1
 
 func (q *Queries) CountTeamMembers(ctx context.Context, teamID uuid.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, CountTeamMembers, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const CountTeamsByUserID = `-- name: CountTeamsByUserID :one
+SELECT COUNT(*) FROM team_memberships tm
+INNER JOIN teams t ON tm.team_id = t.id
+WHERE tm.user_id = $1 
+  AND tm.deleted_at IS NULL
+  AND t.deleted_at IS NULL
+`
+
+func (q *Queries) CountTeamsByUserID(ctx context.Context, userID uuid.UUID) (int64, error) {
+	row := q.db.QueryRowContext(ctx, CountTeamsByUserID, userID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -50,7 +116,7 @@ type CreateTeamParams struct {
 }
 
 // path: backend/sql/teams.sql
-// 🔄 REFACTORED - Removed duplicate team membership queries
+// Team Management SQLC Queries (Fixed query names)
 func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error) {
 	row := q.db.QueryRowContext(ctx, CreateTeam,
 		arg.Name,
@@ -71,6 +137,47 @@ func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const ExistsTeamMember = `-- name: ExistsTeamMember :one
+SELECT EXISTS(
+    SELECT 1 FROM team_memberships
+    WHERE team_id = $1 
+      AND user_id = $2 
+      AND deleted_at IS NULL
+)
+`
+
+type ExistsTeamMemberParams struct {
+	TeamID uuid.UUID `db:"team_id" json:"team_id"`
+	UserID uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+func (q *Queries) ExistsTeamMember(ctx context.Context, arg ExistsTeamMemberParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, ExistsTeamMember, arg.TeamID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const GetRoleByName = `-- name: GetRoleByName :one
+SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles
+WHERE name = $1
+`
+
+func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) {
+	row := q.db.QueryRowContext(ctx, GetRoleByName, name)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Permissions,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -121,6 +228,159 @@ func (q *Queries) GetTeamBySlug(ctx context.Context, slug string) (Team, error) 
 	return i, err
 }
 
+const GetTeamMemberByUserID = `-- name: GetTeamMemberByUserID :one
+SELECT 
+    tm.id,
+    tm.team_id,
+    tm.user_id,
+    tm.role_id,
+    tm.created_at,
+    tm.updated_at,
+    r.name as role_name,
+    r.permissions
+FROM team_memberships tm
+INNER JOIN roles r ON tm.role_id = r.id
+WHERE tm.team_id = $1 
+  AND tm.user_id = $2 
+  AND tm.deleted_at IS NULL
+`
+
+type GetTeamMemberByUserIDParams struct {
+	TeamID uuid.UUID `db:"team_id" json:"team_id"`
+	UserID uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+type GetTeamMemberByUserIDRow struct {
+	ID          uuid.UUID             `db:"id" json:"id"`
+	TeamID      uuid.UUID             `db:"team_id" json:"team_id"`
+	UserID      uuid.UUID             `db:"user_id" json:"user_id"`
+	RoleID      uuid.UUID             `db:"role_id" json:"role_id"`
+	CreatedAt   sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt   sql.NullTime          `db:"updated_at" json:"updated_at"`
+	RoleName    string                `db:"role_name" json:"role_name"`
+	Permissions pqtype.NullRawMessage `db:"permissions" json:"permissions"`
+}
+
+func (q *Queries) GetTeamMemberByUserID(ctx context.Context, arg GetTeamMemberByUserIDParams) (GetTeamMemberByUserIDRow, error) {
+	row := q.db.QueryRowContext(ctx, GetTeamMemberByUserID, arg.TeamID, arg.UserID)
+	var i GetTeamMemberByUserIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.UserID,
+		&i.RoleID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RoleName,
+		&i.Permissions,
+	)
+	return i, err
+}
+
+const GetTeamMembers = `-- name: GetTeamMembers :many
+SELECT 
+    tm.id,
+    tm.team_id,
+    tm.user_id,
+    tm.role_id,
+    tm.created_at,
+    tm.updated_at,
+    u.email,
+    u.username,
+    u.first_name,
+    u.last_name,
+    u.avatar_url,
+    r.name as role_name,
+    r.permissions
+FROM team_memberships tm
+INNER JOIN users u ON tm.user_id = u.id
+INNER JOIN roles r ON tm.role_id = r.id
+WHERE tm.team_id = $1 
+  AND tm.deleted_at IS NULL
+  AND u.deleted_at IS NULL
+ORDER BY tm.created_at ASC
+`
+
+type GetTeamMembersRow struct {
+	ID          uuid.UUID             `db:"id" json:"id"`
+	TeamID      uuid.UUID             `db:"team_id" json:"team_id"`
+	UserID      uuid.UUID             `db:"user_id" json:"user_id"`
+	RoleID      uuid.UUID             `db:"role_id" json:"role_id"`
+	CreatedAt   sql.NullTime          `db:"created_at" json:"created_at"`
+	UpdatedAt   sql.NullTime          `db:"updated_at" json:"updated_at"`
+	Email       string                `db:"email" json:"email"`
+	Username    string                `db:"username" json:"username"`
+	FirstName   string                `db:"first_name" json:"first_name"`
+	LastName    string                `db:"last_name" json:"last_name"`
+	AvatarUrl   sql.NullString        `db:"avatar_url" json:"avatar_url"`
+	RoleName    string                `db:"role_name" json:"role_name"`
+	Permissions pqtype.NullRawMessage `db:"permissions" json:"permissions"`
+}
+
+func (q *Queries) GetTeamMembers(ctx context.Context, teamID uuid.UUID) ([]GetTeamMembersRow, error) {
+	rows, err := q.db.QueryContext(ctx, GetTeamMembers, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTeamMembersRow{}
+	for rows.Next() {
+		var i GetTeamMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.UserID,
+			&i.RoleID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Email,
+			&i.Username,
+			&i.FirstName,
+			&i.LastName,
+			&i.AvatarUrl,
+			&i.RoleName,
+			&i.Permissions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const GetTeamOwner = `-- name: GetTeamOwner :one
+SELECT 
+    tm.user_id,
+    u.email,
+    u.username
+FROM team_memberships tm
+INNER JOIN users u ON tm.user_id = u.id
+INNER JOIN roles r ON tm.role_id = r.id
+WHERE tm.team_id = $1 
+  AND r.name = 'owner'
+  AND tm.deleted_at IS NULL
+LIMIT 1
+`
+
+type GetTeamOwnerRow struct {
+	UserID   uuid.UUID `db:"user_id" json:"user_id"`
+	Email    string    `db:"email" json:"email"`
+	Username string    `db:"username" json:"username"`
+}
+
+func (q *Queries) GetTeamOwner(ctx context.Context, teamID uuid.UUID) (GetTeamOwnerRow, error) {
+	row := q.db.QueryRowContext(ctx, GetTeamOwner, teamID)
+	var i GetTeamOwnerRow
+	err := row.Scan(&i.UserID, &i.Email, &i.Username)
+	return i, err
+}
+
 const ListTeamsByUser = `-- name: ListTeamsByUser :many
 SELECT t.id, t.name, t.slug, t.avatar_url, t.settings, t.is_active, t.created_by, t.created_at, t.updated_at, t.deleted_at
 FROM teams t
@@ -163,6 +423,26 @@ func (q *Queries) ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]Team
 		return nil, err
 	}
 	return items, nil
+}
+
+const RemoveTeamMember = `-- name: RemoveTeamMember :exec
+UPDATE team_memberships
+SET 
+    deleted_at = NOW(),
+    updated_at = NOW()
+WHERE team_id = $1 
+  AND user_id = $2 
+  AND deleted_at IS NULL
+`
+
+type RemoveTeamMemberParams struct {
+	TeamID uuid.UUID `db:"team_id" json:"team_id"`
+	UserID uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+func (q *Queries) RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error {
+	_, err := q.db.ExecContext(ctx, RemoveTeamMember, arg.TeamID, arg.UserID)
+	return err
 }
 
 const SoftDeleteTeam = `-- name: SoftDeleteTeam :exec
@@ -215,6 +495,42 @@ func (q *Queries) UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, e
 		&i.Settings,
 		&i.IsActive,
 		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const UpdateTeamMemberRole = `-- name: UpdateTeamMemberRole :one
+UPDATE team_memberships
+SET 
+    role_id = $2,
+    updated_at = NOW()
+WHERE team_id = $1 
+  AND user_id = $3 
+  AND deleted_at IS NULL
+RETURNING id, team_id, user_id, role_id, invited_by, invitation_token, invitation_accepted_at, is_active, created_at, updated_at, deleted_at
+`
+
+type UpdateTeamMemberRoleParams struct {
+	TeamID uuid.UUID `db:"team_id" json:"team_id"`
+	RoleID uuid.UUID `db:"role_id" json:"role_id"`
+	UserID uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+func (q *Queries) UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) (TeamMembership, error) {
+	row := q.db.QueryRowContext(ctx, UpdateTeamMemberRole, arg.TeamID, arg.RoleID, arg.UserID)
+	var i TeamMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.UserID,
+		&i.RoleID,
+		&i.InvitedBy,
+		&i.InvitationToken,
+		&i.InvitationAcceptedAt,
+		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,

@@ -23,8 +23,6 @@ func setupRouter(container *Container) *chi.Mux {
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	// r.Use(middleware.Logger)
-	// r.Use(middleware.Recoverer)
 	r.Use(middleware.DefaultLogger)
 	r.Use(middleware.Timeout(60 * time.Second))
 
@@ -58,37 +56,32 @@ func setupRouter(container *Container) *chi.Mux {
 		r.Group(func(r chi.Router) {
 			r.Use(container.AuthMiddleware.RequireAuth)
 
+			// Current user route
+			r.Get("/me", handleMe)
+
 			// User management routes
 			r.Get("/users/{id}", container.AuthHandler.GetUser)
 			r.Put("/users/{id}", container.AuthHandler.UpdateUser)
 			r.Delete("/users/{id}", container.AuthHandler.DeleteUser)
 
-			// Current user route
-			r.Get("/me", handleMe)
+			// Team routes
+			r.Route("/teams", func(r chi.Router) {
+				r.Get("/", container.TeamHandler.ListTeams)         // List user's teams
+				r.Post("/", container.TeamHandler.CreateTeam)       // Create team
+				r.Get("/{id}", container.TeamHandler.GetTeam)       // Get team details
+				r.Put("/{id}", container.TeamHandler.UpdateTeam)    // Update team
+				r.Delete("/{id}", container.TeamHandler.DeleteTeam) // Delete team
 
-			// TODO: Add team routes
-			// r.Route("/teams", func(r chi.Router) {
-			//     r.Post("/", container.TeamHandler.CreateTeam)
-			//     r.Get("/{id}", container.TeamHandler.GetTeam)
-			//     r.Put("/{id}", container.TeamHandler.UpdateTeam)
-			//     r.Delete("/{id}", container.TeamHandler.DeleteTeam)
-			//     r.Post("/{id}/members", container.TeamHandler.InviteMember)
-			// })
-
-			// TODO: Add post routes
-			// r.Route("/posts", func(r chi.Router) {
-			//     r.Post("/", container.PostHandler.CreateDraft)
-			//     r.Get("/{id}", container.PostHandler.GetPost)
-			//     r.Put("/{id}", container.PostHandler.UpdatePost)
-			//     r.Delete("/{id}", container.PostHandler.DeletePost)
-			//     r.Post("/{id}/schedule", container.PostHandler.SchedulePost)
-			// })
+				// Team member management
+				r.Post("/{id}/members", container.TeamHandler.InviteMember)                    // Invite member
+				r.Delete("/{id}/members/{userId}", container.TeamHandler.RemoveMember)         // Remove member
+				r.Patch("/{id}/members/{userId}/role", container.TeamHandler.UpdateMemberRole) // Update role
+			})
 
 			// Admin routes
 			r.Group(func(r chi.Router) {
 				r.Use(appMiddleware.RequireAdmin)
 				r.Get("/admin/users", handleAdminUsers)
-				// TODO: Add more admin routes
 			})
 		})
 	})
@@ -112,6 +105,7 @@ func handleRoot(c *Container) http.HandlerFunc {
 				"health": "/health",
 				"signup": "/api/v2/auth/signup",
 				"login":  "/api/v2/auth/login",
+				"teams":  "/api/v2/teams",
 			},
 		}
 		respondJSON(w, http.StatusOK, response)

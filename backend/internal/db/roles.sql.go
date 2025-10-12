@@ -77,30 +77,14 @@ func (q *Queries) GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error) {
 	return i, err
 }
 
-const GetRoleByName = `-- name: GetRoleByName :one
-SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles WHERE name = $1
-`
-
-func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) {
-	row := q.db.QueryRowContext(ctx, GetRoleByName, name)
-	var i Role
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.Permissions,
-		&i.IsSystem,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const ListRoles = `-- name: ListRoles :many
+
 SELECT id, name, description, permissions, is_system, created_at, updated_at FROM roles
 ORDER BY name ASC
 `
 
+// -- name: GetRoleByName :one
+// SELECT * FROM roles WHERE name = $1;
 func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 	rows, err := q.db.QueryContext(ctx, ListRoles)
 	if err != nil {

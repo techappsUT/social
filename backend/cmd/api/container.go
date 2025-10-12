@@ -7,6 +7,7 @@ import (
 
 	appAuth "github.com/techappsUT/social-queue/internal/application/auth"
 	"github.com/techappsUT/social-queue/internal/application/common"
+	appTeam "github.com/techappsUT/social-queue/internal/application/team"
 	appUser "github.com/techappsUT/social-queue/internal/application/user"
 	userDomain "github.com/techappsUT/social-queue/internal/domain/user"
 	"github.com/techappsUT/social-queue/internal/handlers"
@@ -23,21 +24,31 @@ type Container struct {
 	// Database
 	DB *sql.DB
 
-	// Use Cases
+	// User Use Cases
 	CreateUserUC *appUser.CreateUserUseCase
 	LoginUC      *appAuth.LoginUseCase
 	UpdateUserUC *appUser.UpdateUserUseCase
 	GetUserUC    *appUser.GetUserUseCase
 	DeleteUserUC *appUser.DeleteUserUseCase
 
+	// Team Use Cases
+	CreateTeamUC *appTeam.CreateTeamUseCase
+	GetTeamUC    *appTeam.GetTeamUseCase
+	UpdateTeamUC *appTeam.UpdateTeamUseCase
+	DeleteTeamUC *appTeam.DeleteTeamUseCase
+	ListTeamsUC  *appTeam.ListTeamsUseCase
+
 	// Handlers
 	AuthHandler *handlers.AuthHandlerV2
+	TeamHandler *handlers.TeamHandler
 
 	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
 
 	// Services (exposed for other use)
 	TokenService common.TokenService
+	EmailService common.EmailService
+	Logger       common.Logger
 }
 
 // NewContainer creates and initializes the dependency injection container
@@ -70,6 +81,16 @@ func (c *Container) initializeInfrastructure() error {
 		c.Config.JWT.RefreshSecret,
 	)
 
+	emailConfig := services.EmailConfig{
+		Provider:    c.Config.Email.Provider,
+		APIKey:      c.Config.Email.APIKey,
+		FromAddress: c.Config.Email.FromAddress,
+		FromName:    c.Config.Email.FromName,
+	}
+	c.EmailService = services.NewEmailService(emailConfig)
+
+	c.Logger = services.NewLogger()
+
 	// Initialize middleware
 	c.AuthMiddleware = middleware.NewAuthMiddleware(c.TokenService)
 
@@ -80,28 +101,25 @@ func (c *Container) initializeInfrastructure() error {
 func (c *Container) initializeUseCases() error {
 	// Repositories
 	userRepo := persistence.NewUserRepository(c.DB)
+	teamRepo := persistence.NewTeamRepository(c.DB)
+	memberRepo := persistence.NewTeamMemberRepository(c.DB)
 
 	// Domain Services
 	userService := userDomain.NewService(userRepo)
 
-	// Infrastructure Services
-	emailConfig := services.EmailConfig{
-		Provider:    c.Config.Email.Provider,
-		APIKey:      c.Config.Email.APIKey,
-		FromAddress: c.Config.Email.FromAddress,
-		FromName:    c.Config.Email.FromName,
-	}
-	emailService := services.NewEmailService(emailConfig)
-	cacheService := services.NewInMemoryCacheService()
-	logger := services.NewLogger()
+	// Cache Service
+	cacheService := services.NewInMemoryCache()
 
-	// User Use Cases
+	// ========================================================================
+	// USER USE CASES
+	// ========================================================================
+
 	c.CreateUserUC = appUser.NewCreateUserUseCase(
 		userRepo,
 		userService,
 		c.TokenService,
-		emailService,
-		logger,
+		c.EmailService,
+		c.Logger,
 	)
 
 	c.LoginUC = appAuth.NewLoginUseCase(
@@ -109,34 +127,68 @@ func (c *Container) initializeUseCases() error {
 		userService,
 		c.TokenService,
 		cacheService,
-		logger,
+		c.Logger,
 	)
 
 	c.UpdateUserUC = appUser.NewUpdateUserUseCase(
 		userRepo,
-		logger,
+		c.Logger,
 	)
 
 	c.GetUserUC = appUser.NewGetUserUseCase(
 		userRepo,
-		logger,
+		c.Logger,
 	)
 
 	c.DeleteUserUC = appUser.NewDeleteUserUseCase(
 		userRepo,
-		c.TokenService,
-		logger,
+		c.Logger,
 	)
 
-	// TODO: Add more use cases here as you create them
-	// c.CreateTeamUC = appTeam.NewCreateTeamUseCase(...)
-	// c.CreatePostUC = appPost.NewCreatePostUseCase(...)
+	// ========================================================================
+	// TEAM USE CASES
+	// ========================================================================
+
+	c.CreateTeamUC = appTeam.NewCreateTeamUseCase(
+		teamRepo,
+		memberRepo,
+		userRepo,
+		c.Logger,
+	)
+
+	c.GetTeamUC = appTeam.NewGetTeamUseCase(
+		teamRepo,
+		memberRepo,
+		userRepo,
+		c.Logger,
+	)
+
+	c.UpdateTeamUC = appTeam.NewUpdateTeamUseCase(
+		teamRepo,
+		memberRepo,
+		userRepo,
+		c.Logger,
+	)
+
+	c.DeleteTeamUC = appTeam.NewDeleteTeamUseCase(
+		teamRepo,
+		memberRepo,
+		c.Logger,
+	)
+
+	c.ListTeamsUC = appTeam.NewListTeamsUseCase(
+		teamRepo,
+		memberRepo,
+		userRepo,
+		c.Logger,
+	)
 
 	return nil
 }
 
-// initializeHandlers sets up HTTP handlers
+// initializeHandlers sets up all HTTP handlers
 func (c *Container) initializeHandlers() error {
+	// User/Auth Handler
 	c.AuthHandler = handlers.NewAuthHandlerV2(
 		c.CreateUserUC,
 		c.LoginUC,
@@ -145,16 +197,14 @@ func (c *Container) initializeHandlers() error {
 		c.DeleteUserUC,
 	)
 
-	// TODO: Add more handlers here
-	// c.TeamHandler = handlers.NewTeamHandler(...)
-	// c.PostHandler = handlers.NewPostHandler(...)
+	// Team Handler
+	c.TeamHandler = handlers.NewTeamHandler(
+		c.CreateTeamUC,
+		c.GetTeamUC,
+		c.UpdateTeamUC,
+		c.DeleteTeamUC,
+		c.ListTeamsUC,
+	)
 
 	return nil
-}
-
-// Cleanup releases all resources
-func (c *Container) Cleanup() {
-	if c.DB != nil {
-		c.DB.Close()
-	}
 }

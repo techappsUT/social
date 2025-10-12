@@ -1,334 +1,653 @@
-# SocialQueue - Actionable Development Prompts
+# SocialQueue - Complete Module Development Prompts
 
-## 🚀 Immediate Action Items (Do These Now!)
+## 🎯 How to Use These Prompts
 
-### Prompt 1: Fix Database Schema
+Each prompt gives you a **COMPLETE MODULE** that you can build, test, and verify independently.
+
+**DON'T** ask for "step-by-step guides" or partial implementations.
+**DO** use these prompts to get complete, working modules.
+
+---
+
+## 📦 MODULE 1: Complete Team Management
+
+### Prompt: Team Module - Complete Implementation
+
 ```
-Task: Generate and run the migration to fix the users table schema mismatch.
+I need a COMPLETE team management module for my SocialQueue application using Clean Architecture.
 
-Requirements:
-1. Add username, first_name, last_name columns to users table
-2. Make username unique and not null
-3. Update SQLC queries to match new schema
-4. Test with existing seed data
+PROJECT CONTEXT:
+- Backend: Go with Chi router, PostgreSQL, SQLC
+- Module path: github.com/techappsUT/social-queue
+- Following Clean Architecture (Domain → Application → Infrastructure → Presentation)
+- Reference: Look at my existing User module for patterns
 
-Generate:
-- Migration SQL file
-- Updated SQLC queries
-- Test to verify migration works
-```
+WHAT TO CREATE:
 
-### Prompt 2: Complete User Use Cases
-```
-Task: Implement the remaining user use cases in the application layer.
-
-Create these use cases:
-1. UpdateUser - update profile information
-2. GetUser - retrieve user by ID
-3. DeleteUser - soft delete user
-4. VerifyEmail - verify email with token
-5. ResetPassword - reset password with token
-
-For each use case, include:
-- Input/Output DTOs
-- Validation logic
-- Error handling
-- Domain service calls
-- Event publishing
-
-File paths should be: backend/internal/application/user/{usecase}.go
-```
-
-### Prompt 3: Implement User Repository (PostgreSQL)
-```
-Task: Create PostgreSQL implementation of the user.Repository interface using SQLC.
-
-Requirements:
-1. Implement all methods from domain/user/repository.go interface
-2. Use SQLC generated queries
-3. Handle transactions properly
-4. Map between domain entities and database models
-5. Include proper error handling
-
-File path: backend/internal/infrastructure/persistence/user_repository.go
-Include: Unit tests with testify
-```
-
-## 📝 Week 1 Development Prompts
-
-### Day 1-2: Team Management
-```
-Task: Implement team use cases and repository.
-
-Create:
-1. Application use cases:
+1. SQLC QUERIES (backend/sql/teams.sql):
    - CreateTeam
-   - InviteMember  
-   - UpdateTeamSettings
-   - RemoveMember
+   - GetTeam (by ID)
+   - GetTeamsByUserID
+   - UpdateTeam
+   - DeleteTeam (soft delete)
+   - AddTeamMember
+   - RemoveTeamMember
    - UpdateMemberRole
+   - GetTeamMembers
+   - GetTeamMemberByUserID
+   - CountTeams
+   - CountTeamMembers
 
-2. Repository implementation:
-   - PostgreSQL team repository using SQLC
+2. TEAM REPOSITORY (backend/internal/infrastructure/persistence/team_repository.go):
+   - Implement ALL methods from domain/team/repository.go interface
+   - Use SQLC generated queries
+   - Handle transactions for member operations
+   - Map between domain entities and database models
+   - Include proper error handling
 
-3. HTTP handlers:
-   - Team creation endpoint
-   - Member invitation endpoint
-   - Settings update endpoint
+3. TEAM USE CASES (backend/internal/application/team/):
+   Create 8 complete use cases:
+   
+   a) create_team.go
+      - Input: name, description, plan, ownerID
+      - Validation: name required, owner exists
+      - Business logic: create team, add owner as admin
+      - Output: TeamDTO with members
+   
+   b) get_team.go
+      - Input: teamID, userID (for authorization)
+      - Validation: user is team member
+      - Output: TeamDTO with members
+   
+   c) update_team.go
+      - Input: teamID, name, description, settings
+      - Authorization: only admins can update
+      - Output: Updated TeamDTO
+   
+   d) delete_team.go
+      - Input: teamID, userID
+      - Authorization: only owner can delete
+      - Business logic: soft delete, remove all members
+   
+   e) invite_member.go
+      - Input: teamID, email, role, inviterID
+      - Authorization: only admins can invite
+      - Business logic: check seat limits, send invitation email
+      - Output: MemberDTO
+   
+   f) remove_member.go
+      - Input: teamID, userID, removerID
+      - Authorization: admins can remove, owner cannot be removed
+      - Business logic: check if last admin
+   
+   g) update_member_role.go
+      - Input: teamID, userID, newRole, updaterID
+      - Authorization: only owner can change roles
+      - Business logic: validate role, prevent removing last admin
+   
+   h) list_teams.go
+      - Input: userID, pagination
+      - Output: List of teams user belongs to
 
-Include proper authorization checks (only admins can invite/remove).
+4. TEAM HANDLER (backend/internal/handlers/team_handler.go):
+   - POST /api/v2/teams - CreateTeam
+   - GET /api/v2/teams/:id - GetTeam
+   - PUT /api/v2/teams/:id - UpdateTeam
+   - DELETE /api/v2/teams/:id - DeleteTeam
+   - POST /api/v2/teams/:id/members - InviteMember
+   - DELETE /api/v2/teams/:id/members/:userId - RemoveMember
+   - PATCH /api/v2/teams/:id/members/:userId/role - UpdateMemberRole
+   - GET /api/v2/teams - ListTeams
+
+5. UPDATE CONTAINER (backend/cmd/api/container.go):
+   - Add TeamRepository
+   - Add all 8 use cases
+   - Add TeamHandler
+   - Wire dependencies
+
+6. UPDATE ROUTER (backend/cmd/api/router.go):
+   - Register all team routes
+   - Apply auth middleware
+   - Add admin checks where needed
+
+7. INTEGRATION TESTS (backend/tests/integration/team_test.go):
+   - Test complete team lifecycle
+   - Test member management
+   - Test authorization checks
+   - Test error cases
+
+REQUIREMENTS:
+- Use existing domain/team entities (they're already defined)
+- Follow same patterns as domain/user implementation
+- All DTOs should have json tags
+- Include comprehensive error handling
+- Add logging for important operations
+- Use transactions where needed
+- Include inline documentation
+- Make it production-ready
+
+GENERATE:
+- All 7 files listed above
+- Runnable, testable code
+- No TODOs or placeholders
+- Complete implementation
 ```
 
-### Day 3-4: Post Scheduling System
-```
-Task: Build the complete post scheduling system.
+---
 
-Implement:
-1. Post use cases:
-   - CreatePost (with media upload)
-   - SchedulePost (with timezone handling)
+## 📦 MODULE 2: Complete Post Scheduling
+
+### Prompt: Post Module - Complete Implementation
+
+```
+I need a COMPLETE post scheduling module for my SocialQueue application using Clean Architecture.
+
+PROJECT CONTEXT:
+- Backend: Go with Chi router, PostgreSQL, SQLC
+- Module path: github.com/techappsUT/social-queue
+- Following Clean Architecture
+- Reference: My User and Team modules for patterns
+
+WHAT TO CREATE:
+
+1. SQLC QUERIES (backend/sql/posts.sql):
+   - CreatePost
+   - GetPost (by ID)
+   - GetPostsByTeamID
+   - GetPostsByUserID
+   - GetScheduledPosts (due for publishing)
+   - GetPostQueue (scheduled posts for a team)
    - UpdatePost
-   - DeletePost  
-   - ApprovePost
-   - GetPostQueue
+   - UpdatePostStatus
+   - DeletePost (soft delete)
+   - CountPosts (by team, by status)
+   - GetPostsByDateRange
 
-2. Scheduler service:
-   - Queue management
-   - Priority handling
-   - Rate limit checking
+2. POST REPOSITORY (backend/internal/infrastructure/persistence/post_repository.go):
+   - Implement ALL methods from domain/post/repository.go interface
+   - Use SQLC generated queries
+   - Handle post attachments (media URLs)
+   - Map between domain entities and database models
 
-3. API endpoints:
-   - POST /api/posts
-   - GET /api/posts/queue
-   - PATCH /api/posts/:id
-   - DELETE /api/posts/:id
+3. POST USE CASES (backend/internal/application/post/):
+   Create 7 complete use cases:
+   
+   a) create_draft.go
+      - Input: content, platforms[], attachments[], teamID, authorID
+      - Validation: content not empty, valid platforms, team member
+      - Business logic: create draft, save attachments
+      - Output: PostDTO
+   
+   b) schedule_post.go
+      - Input: postID, scheduledAt, timezone
+      - Authorization: author or team admin
+      - Business logic: validate future time, check rate limits
+      - Output: PostDTO with schedule
+   
+   c) update_post.go
+      - Input: postID, content, platforms, attachments
+      - Authorization: author or admin
+      - Validation: not published yet
+      - Output: Updated PostDTO
+   
+   d) delete_post.go
+      - Input: postID, userID
+      - Authorization: author or admin
+      - Business logic: cancel if scheduled
+   
+   e) get_post.go
+      - Input: postID, userID
+      - Authorization: team member
+      - Output: PostDTO with full details
+   
+   f) list_posts.go
+      - Input: teamID, status filter, pagination
+      - Authorization: team member
+      - Output: List of PostDTOs
+   
+   g) publish_now.go
+      - Input: postID, userID
+      - Authorization: author or admin
+      - Business logic: validate ready to publish, mark as queued
+      - Output: PostDTO
+
+4. POST HANDLER (backend/internal/handlers/post_handler.go):
+   - POST /api/v2/posts - CreateDraft
+   - GET /api/v2/posts/:id - GetPost
+   - PUT /api/v2/posts/:id - UpdatePost
+   - DELETE /api/v2/posts/:id - DeletePost
+   - POST /api/v2/posts/:id/schedule - SchedulePost
+   - POST /api/v2/posts/:id/publish - PublishNow
+   - GET /api/v2/teams/:teamId/posts - ListPosts
+   - GET /api/v2/teams/:teamId/queue - GetPostQueue
+
+5. UPDATE CONTAINER & ROUTER:
+   - Add PostRepository
+   - Add all 7 use cases
+   - Add PostHandler
+   - Register routes
+
+6. INTEGRATION TESTS:
+   - Test post lifecycle (draft → schedule → publish)
+   - Test permissions
+   - Test date/time handling
+   - Test media attachments
+
+REQUIREMENTS:
+- Use domain/post entities
+- Handle timezones correctly
+- Support multiple platforms per post
+- Character count per platform
+- Media URL validation
+- Schedule validation (future dates only)
+- Production-ready
+
+GENERATE:
+- All files complete and working
+- No placeholders
+- Full error handling
 ```
 
-### Day 5: Social Account Management
+---
+
+## 📦 MODULE 3: Complete Social OAuth & Publishing
+
+### Prompt: Social Module - Complete Implementation
+
 ```
-Task: Implement social account connection flow.
+I need a COMPLETE social media OAuth and publishing module for SocialQueue using Clean Architecture.
 
-Build:
-1. OAuth flow handlers:
-   - Initiate OAuth redirect
-   - Handle OAuth callback
-   - Store encrypted tokens
+PROJECT CONTEXT:
+- Backend: Go with Chi router, PostgreSQL, SQLC
+- Module path: github.com/techappsUT/social-queue
+- Need OAuth for: Twitter (X), LinkedIn, Facebook
+- Following Clean Architecture
 
-2. Use cases:
-   - ConnectSocialAccount
-   - DisconnectSocialAccount
-   - RefreshSocialTokens
-   - ListConnectedAccounts
+WHAT TO CREATE:
 
-3. Token encryption:
-   - AES encryption for tokens
-   - Secure storage in database
+1. SOCIAL ADAPTER INTERFACE (backend/internal/adapters/social/adapter.go):
+   ```go
+   type Adapter interface {
+       // OAuth
+       GetAuthURL(state string, scopes []string) string
+       ExchangeCode(ctx context.Context, code string) (*OAuthToken, error)
+       RefreshToken(ctx context.Context, refreshToken string) (*OAuthToken, error)
+       
+       // Publishing
+       PublishPost(ctx context.Context, token *OAuthToken, post *Post) (*PublishResult, error)
+       DeletePost(ctx context.Context, token *OAuthToken, postID string) error
+       
+       // Analytics
+       GetPostAnalytics(ctx context.Context, token *OAuthToken, postID string) (*Analytics, error)
+       
+       // Validation
+       ValidateToken(ctx context.Context, token *OAuthToken) (bool, error)
+   }
+   ```
 
-File paths: 
-- backend/internal/application/social/*.go
-- backend/internal/adapters/oauth/*.go
+2. PLATFORM ADAPTERS:
+   
+   a) Twitter Adapter (backend/internal/adapters/social/twitter/):
+      - client.go: OAuth 2.0 PKCE flow implementation
+      - publisher.go: Tweet creation, media upload
+      - Use Twitter API v2
+   
+   b) LinkedIn Adapter (backend/internal/adapters/social/linkedin/):
+      - client.go: LinkedIn OAuth 2.0
+      - publisher.go: Post creation (text + images)
+      - Use LinkedIn Marketing API
+   
+   c) Facebook Adapter (backend/internal/adapters/social/facebook/):
+      - client.go: Facebook OAuth
+      - publisher.go: Page post creation
+      - Use Graph API v18
+
+3. SQLC QUERIES (backend/sql/social.sql):
+   - CreateSocialAccount
+   - GetSocialAccount
+   - GetSocialAccountsByTeamID
+   - GetSocialAccountsByPlatform
+   - UpdateSocialAccount
+   - DeleteSocialAccount
+   - StoreTokens (encrypted)
+   - GetTokens
+   - CountAccountsByPlatform
+
+4. SOCIAL REPOSITORY (backend/internal/infrastructure/persistence/social_repository.go):
+   - Implement domain/social/repository.go interface
+   - Encrypt/decrypt OAuth tokens
+   - Handle token refresh
+
+5. SOCIAL USE CASES (backend/internal/application/social/):
+   
+   a) connect_account.go
+      - Input: teamID, platform, authCode, state
+      - Business logic: exchange code, store encrypted tokens
+      - Output: SocialAccountDTO
+   
+   b) disconnect_account.go
+      - Input: accountID, userID
+      - Authorization: team admin
+      - Business logic: revoke tokens, delete account
+   
+   c) refresh_tokens.go
+      - Input: accountID
+      - Business logic: refresh OAuth tokens, update storage
+   
+   d) list_accounts.go
+      - Input: teamID
+      - Output: List of connected accounts
+   
+   e) publish_post.go
+      - Input: accountID, postID
+      - Business logic: get post, get account, call adapter.PublishPost
+      - Output: PublishResult
+   
+   f) get_analytics.go
+      - Input: accountID, postID, platformPostID
+      - Business logic: fetch from platform, cache results
+
+6. SOCIAL HANDLER (backend/internal/handlers/social_handler.go):
+   - GET /api/v2/social/auth/:platform - Initiate OAuth
+   - GET /api/v2/social/auth/:platform/callback - OAuth callback
+   - POST /api/v2/social/accounts - Connect account
+   - GET /api/v2/teams/:teamId/social/accounts - List accounts
+   - DELETE /api/v2/social/accounts/:id - Disconnect
+   - POST /api/v2/social/accounts/:id/refresh - Refresh tokens
+   - POST /api/v2/posts/:postId/publish - Publish post
+   - GET /api/v2/posts/:postId/analytics - Get analytics
+
+7. TOKEN ENCRYPTION SERVICE (backend/internal/infrastructure/services/encryption.go):
+   - AES-256 encryption for OAuth tokens
+   - Secure key management
+   - Encrypt/Decrypt functions
+
+8. UPDATE CONTAINER & ROUTER
+
+9. INTEGRATION TESTS:
+   - Test OAuth flow (mock external APIs)
+   - Test token refresh
+   - Test publishing
+   - Test multiple platforms
+
+REQUIREMENTS:
+- Production OAuth credentials handling
+- Secure token storage (encrypted)
+- Token refresh before expiry
+- Rate limiting per platform
+- Error handling for API failures
+- Retry logic with exponential backoff
+- Platform-specific character limits
+- Media upload support
+
+GENERATE:
+- Complete implementation for all 3 platforms
+- No API keys hardcoded (use env vars)
+- Full error handling
+- Production-ready
 ```
 
-## 🎨 Frontend Development Prompts
+---
 
-### Frontend Setup & Auth
+## 📦 MODULE 4: Complete Worker System
+
+### Prompt: Worker System - Complete Implementation
+
 ```
-Task: Set up Next.js frontend with authentication.
+I need a COMPLETE background worker system for processing scheduled posts in SocialQueue.
 
-Create:
-1. Authentication pages:
-   - Login page with form validation
-   - Signup page with password requirements
-   - Email verification page
-   - Password reset flow
+PROJECT CONTEXT:
+- Backend: Go
+- Module path: github.com/techappsUT/social-queue
+- Need to process scheduled posts automatically
+- Use Redis for queue/locks
 
-2. Auth context/hooks:
-   - useAuth hook with React Query
-   - Protected route wrapper
-   - Token refresh logic
+WHAT TO CREATE:
 
-3. Components:
-   - Navigation with user menu
-   - Loading states
-   - Error boundaries
+1. REDIS CACHE SERVICE (backend/internal/infrastructure/services/redis_cache.go):
+   - Implement common.CacheService interface
+   - Connection pooling
+   - Methods: Get, Set, Delete, Lock, Unlock
+   - TTL support
 
-Use shadcn/ui components (Button, Input, Card, Form).
-Use react-hook-form for forms and zod for validation.
-```
-
-### Dashboard Implementation
-```
-Task: Build the main dashboard with post composer.
-
-Create:
-1. Dashboard layout:
-   - Sidebar navigation
-   - Top header with user info
-   - Main content area
-
-2. Post composer:
-   - Rich text editor (TipTap or Slate)
-   - Image/video upload with preview
-   - Platform selector (Twitter, LinkedIn, etc.)
-   - Schedule picker with timezone
-   - Character counter per platform
-
-3. Post queue view:
-   - Drag-and-drop reordering
-   - Calendar view
-   - List view with filters
-   - Quick actions (edit, delete, reschedule)
-
-Use Tailwind CSS for styling and shadcn/ui components.
-```
-
-## 🔧 Infrastructure Prompts
-
-### Redis Cache Implementation
-```
-Task: Implement Redis caching layer.
-
-Create:
-1. Redis cache service implementing CacheService interface
-2. Caching strategies for:
-   - User sessions (1 hour TTL)
-   - Team data (10 minutes TTL)
-   - Post queue (5 minutes TTL)
-   - Analytics data (30 minutes TTL)
-
-3. Cache invalidation on:
-   - User updates
-   - Team changes
-   - New posts scheduled
-
-File path: backend/internal/infrastructure/services/redis_cache.go
-```
-
-### Worker System
-```
-Task: Build the background worker for post publishing.
-
-Implement:
-1. Worker main loop:
-   - Poll for due posts every minute
-   - Process posts in priority order
-   - Respect rate limits per platform
-
-2. Publishing logic:
-   - Acquire lock on post
-   - Call social adapter
-   - Handle success/failure
-   - Update post status
-   - Record analytics
-
-3. Retry mechanism:
-   - Exponential backoff
-   - Max 3 retries
+2. WORKER QUEUE SERVICE (backend/internal/infrastructure/services/worker_queue.go):
+   - Enqueue job
+   - Dequeue job
+   - Mark job complete/failed
+   - Retry logic
    - Dead letter queue
 
-File path: backend/cmd/worker/main.go
+3. WORKER MAIN (backend/cmd/worker/main.go):
+   ```go
+   func main() {
+       // Initialize dependencies
+       // Start job processors
+       // Graceful shutdown
+   }
+   ```
+
+4. JOB PROCESSORS (backend/cmd/worker/jobs/):
+   
+   a) publish_post.go:
+      - Query due posts (scheduled_at <= now)
+      - Acquire lock per post
+      - Get social accounts for post
+      - Call social adapter to publish
+      - Update post status
+      - Record analytics
+      - Handle errors (retry up to 3 times)
+   
+   b) fetch_analytics.go:
+      - Query published posts (24hrs+ old)
+      - Fetch analytics from each platform
+      - Store in database
+      - Update post metrics
+   
+   c) cleanup.go:
+      - Delete old draft posts (30+ days)
+      - Clean up failed jobs
+      - Archive old analytics
+
+5. WORKER CONFIGURATION:
+   - Poll interval (1 minute)
+   - Batch size (10 posts per run)
+   - Retry attempts (3)
+   - Retry delay (exponential backoff)
+   - Concurrency (5 workers)
+
+6. UPDATE DOCKER COMPOSE:
+   ```yaml
+   worker:
+     build:
+       context: ./backend
+       dockerfile: Dockerfile.worker
+     depends_on:
+       - postgres
+       - redis
+     environment:
+       - DATABASE_URL=...
+       - REDIS_URL=...
+   ```
+
+7. OBSERVABILITY:
+   - Structured logging
+   - Metrics (posts processed, failures, latency)
+   - Health check endpoint
+
+8. INTEGRATION TESTS:
+   - Test post scheduling → publishing flow
+   - Test retry logic
+   - Test concurrent processing
+   - Test dead letter queue
+
+REQUIREMENTS:
+- Idempotent job processing
+- At-most-once delivery
+- Graceful shutdown
+- No race conditions
+- Production-ready
+
+GENERATE:
+- All worker files
+- Dockerfile.worker
+- Updated docker-compose.yml
+- Tests
 ```
 
-## 🧪 Testing Prompts
+---
 
-### Integration Test Suite
+## 📦 MODULE 5: Complete Frontend
+
+### Prompt: Frontend - Complete Implementation
+
 ```
-Task: Create comprehensive integration tests.
+I need a COMPLETE Next.js 14 frontend for SocialQueue (Buffer clone) using App Router, TypeScript, Tailwind, and shadcn/ui.
 
-Write tests for:
-1. Complete user journey:
-   - Signup → Verify email → Login
-   - Create team → Invite member
-   - Connect social account
-   - Create and schedule post
-   - View analytics
+PROJECT CONTEXT:
+- Framework: Next.js 14 with App Router
+- Styling: Tailwind CSS + shadcn/ui
+- Forms: react-hook-form + zod
+- API: React Query
+- Backend: http://localhost:8000/api/v2
 
-2. API endpoint tests:
-   - Authentication required
-   - Input validation
-   - Error responses
-   - Success cases
+WHAT TO CREATE:
 
-3. Database tests:
-   - Repository methods
-   - Transactions
-   - Concurrent access
+1. AUTHENTICATION PAGES (src/app/(auth)/):
+   
+   a) login/page.tsx:
+      - Email + password form
+      - Form validation (zod)
+      - Error handling
+      - Redirect to /dashboard on success
+      - Link to signup
+   
+   b) signup/page.tsx:
+      - Email, username, password, firstName, lastName
+      - Password strength indicator
+      - Form validation
+      - Call POST /api/v2/auth/signup
+      - Redirect to /verify-email
+   
+   c) verify-email/page.tsx:
+      - Show verification sent message
+      - Resend verification link
+      - Auto-redirect when verified
 
-Use testcontainers for Postgres and Redis.
+2. DASHBOARD LAYOUT (src/app/(dashboard)/):
+   
+   a) layout.tsx:
+      - Sidebar navigation
+      - Top header with user menu
+      - Protected route wrapper
+   
+   b) dashboard/page.tsx:
+      - Overview stats (posts scheduled, published, analytics)
+      - Recent posts list
+      - Quick actions
+
+3. POST COMPOSER (src/app/(dashboard)/compose/page.tsx):
+   - Rich text editor (Tiptap)
+   - Character counter per platform
+   - Platform selector (Twitter, LinkedIn, Facebook)
+   - Media upload (drag & drop)
+   - Image preview
+   - Schedule picker (date + time + timezone)
+   - Draft save
+   - Publish / Schedule buttons
+
+4. POST QUEUE (src/app/(dashboard)/queue/page.tsx):
+   - Calendar view (react-big-calendar)
+   - List view with filters
+   - Drag-and-drop reordering
+   - Quick actions: edit, delete, reschedule
+   - Status indicators
+
+5. SOCIAL ACCOUNTS (src/app/(dashboard)/accounts/page.tsx):
+   - Connected accounts list
+   - Connect new account buttons
+   - OAuth flow handling
+   - Disconnect account
+   - Account health status
+
+6. ANALYTICS (src/app/(dashboard)/analytics/page.tsx):
+   - Charts (recharts):
+     * Line chart: impressions over time
+     * Bar chart: engagement by platform
+     * Pie chart: post distribution
+   - Top performing posts table
+   - Export CSV
+
+7. SHARED COMPONENTS (src/components/):
+   
+   - ui/: shadcn/ui components (button, input, card, form, dialog, etc.)
+   - auth/login-form.tsx
+   - auth/signup-form.tsx
+   - posts/post-card.tsx
+   - posts/post-composer.tsx
+   - posts/schedule-picker.tsx
+   - social/account-card.tsx
+   - social/oauth-button.tsx
+   - layout/sidebar.tsx
+   - layout/header.tsx
+
+8. API CLIENT (src/lib/api.ts):
+   - Axios/fetch wrapper
+   - Token management
+   - Request interceptors
+   - Error handling
+
+9. REACT QUERY HOOKS (src/hooks/):
+   - use-auth.ts: login, signup, logout
+   - use-posts.ts: createPost, updatePost, deletePost, getPosts
+   - use-accounts.ts: connectAccount, getAccounts, disconnect
+   - use-analytics.ts: getAnalytics
+
+10. AUTHENTICATION CONTEXT (src/components/providers/auth-provider.tsx):
+    - User state management
+    - Token refresh
+    - Protected route HOC
+
+REQUIREMENTS:
+- Full TypeScript
+- All forms use react-hook-form + zod
+- Responsive design (mobile-first)
+- Dark mode support
+- Loading states everywhere
+- Error boundaries
+- Toast notifications (sonner)
+- Optimistic updates
+- Production-ready
+
+GENERATE:
+- All pages and components
+- Full functionality
+- No placeholders
+- Works with backend API
 ```
 
-## 📊 Analytics Implementation
-```
-Task: Build analytics collection and visualization.
+---
 
-Create:
-1. Analytics collector:
-   - Fetch metrics from platforms
-   - Store in time-series format
-   - Calculate engagement rates
+## 🎯 USAGE TIPS
 
-2. Aggregation service:
-   - Daily/weekly/monthly rollups
-   - Per-post metrics
-   - Per-platform metrics
+1. **Copy the entire prompt** for the module you want
+2. **Paste into Claude** and get the complete module
+3. **Test immediately** - it should compile and work
+4. **Move to next module** when tests pass
 
-3. Frontend charts:
-   - Line chart for impressions over time
-   - Bar chart for engagement by platform
-   - Pie chart for audience demographics
-   - Table for top performing posts
+---
 
-Use Recharts for visualization.
-```
+## ✅ VALIDATION CHECKLIST
 
-## 🚀 Production Deployment
-```
-Task: Prepare for production deployment.
+After receiving each module:
 
-Set up:
-1. GitHub Actions CI/CD:
-   - Run tests on PR
-   - Build Docker images
-   - Push to registry
-   - Deploy to staging
+- [ ] All files compile without errors
+- [ ] `make test` passes
+- [ ] Integration tests pass
+- [ ] API endpoints respond correctly
+- [ ] No TODO comments
+- [ ] Documentation is complete
+- [ ] You can demonstrate the feature working
 
-2. Kubernetes manifests:
-   - Deployment for API
-   - Deployment for workers
-   - Service definitions
-   - Ingress with TLS
+---
 
-3. Monitoring:
-   - Prometheus metrics
-   - Grafana dashboards
-   - Sentry error tracking
-   - Uptime monitoring
-
-4. Security:
-   - Environment secrets
-   - Database SSL
-   - API rate limiting
-   - CORS configuration
-```
-
-## 💡 Tips for Using These Prompts
-
-1. **Always specify file paths** in your prompts
-2. **Include test requirements** for each component
-3. **Ask for error handling** explicitly
-4. **Request documentation** inline with code
-5. **Specify which patterns** to follow (Clean Architecture)
-
-## Example Enhanced Prompt Format:
-```
-Task: [Specific task]
-Context: [Current state of the project]
-Requirements:
-- [Requirement 1]
-- [Requirement 2]
-Generate:
-- [File 1 with path]
-- [File 2 with path]
-- [Tests]
-Include: Error handling, logging, and inline documentation
-```
+**Last Updated**: October 12, 2025

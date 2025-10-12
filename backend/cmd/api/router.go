@@ -1,7 +1,6 @@
 // ============================================================================
 // FILE: backend/cmd/api/router.go
-// FIXED: Removed TeamHandler methods that don't exist yet
-// (InviteMember, RemoveMember, UpdateMemberRole)
+// COMPLETE FILE - Ready to replace your current file
 // ============================================================================
 package main
 
@@ -67,19 +66,21 @@ func setupRouter(container *Container) *chi.Mux {
 			r.Put("/users/{id}", container.AuthHandler.UpdateUser)
 			r.Delete("/users/{id}", container.AuthHandler.DeleteUser)
 
-			// Team routes
+			// ================================================================
+			// TEAM ROUTES (WITH NEW MEMBER MANAGEMENT)
+			// ================================================================
 			r.Route("/teams", func(r chi.Router) {
+				// Team CRUD
 				r.Get("/", container.TeamHandler.ListTeams)         // List user's teams
 				r.Post("/", container.TeamHandler.CreateTeam)       // Create team
 				r.Get("/{id}", container.TeamHandler.GetTeam)       // Get team details
 				r.Put("/{id}", container.TeamHandler.UpdateTeam)    // Update team
 				r.Delete("/{id}", container.TeamHandler.DeleteTeam) // Delete team
 
-				// REMOVED: Team member management methods - these use cases haven't been implemented yet
-				// TODO: Implement these in future iteration:
-				// - POST /{id}/members - InviteMember
-				// - DELETE /{id}/members/{userId} - RemoveMember
-				// - PATCH /{id}/members/{userId}/role - UpdateMemberRole
+				// NEW: Team member management routes
+				r.Post("/{id}/members", container.TeamHandler.InviteMember)                    // Invite member
+				r.Delete("/{id}/members/{userId}", container.TeamHandler.RemoveMember)         // Remove member
+				r.Patch("/{id}/members/{userId}/role", container.TeamHandler.UpdateMemberRole) // Update role
 			})
 
 			// Admin routes

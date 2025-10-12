@@ -1,6 +1,6 @@
 // ============================================================================
 // FILE: backend/cmd/api/container.go
-// FIXED: NewInMemoryCacheService and DeleteUserUseCase with TokenService
+// COMPLETE FILE - Ready to replace your current file
 // ============================================================================
 package main
 
@@ -35,11 +35,14 @@ type Container struct {
 	DeleteUserUC *appUser.DeleteUserUseCase
 
 	// Team Use Cases
-	CreateTeamUC *appTeam.CreateTeamUseCase
-	GetTeamUC    *appTeam.GetTeamUseCase
-	UpdateTeamUC *appTeam.UpdateTeamUseCase
-	DeleteTeamUC *appTeam.DeleteTeamUseCase
-	ListTeamsUC  *appTeam.ListTeamsUseCase
+	CreateTeamUC       *appTeam.CreateTeamUseCase
+	GetTeamUC          *appTeam.GetTeamUseCase
+	UpdateTeamUC       *appTeam.UpdateTeamUseCase
+	DeleteTeamUC       *appTeam.DeleteTeamUseCase
+	ListTeamsUC        *appTeam.ListTeamsUseCase
+	InviteMemberUC     *appTeam.InviteMemberUseCase     // NEW
+	RemoveMemberUC     *appTeam.RemoveMemberUseCase     // NEW
+	UpdateMemberRoleUC *appTeam.UpdateMemberRoleUseCase // NEW
 
 	// Handlers
 	AuthHandler *handlers.AuthHandlerV2
@@ -111,7 +114,6 @@ func (c *Container) initializeUseCases() error {
 	userService := userDomain.NewService(userRepo)
 
 	// Cache Service
-	// FIXED: Changed from NewInMemoryCache() to NewInMemoryCacheService()
 	cacheService := services.NewInMemoryCacheService()
 
 	// ========================================================================
@@ -144,7 +146,6 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
-	// FIXED: Added c.TokenService as second parameter
 	c.DeleteUserUC = appUser.NewDeleteUserUseCase(
 		userRepo,
 		c.TokenService,
@@ -189,6 +190,31 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
+	// ========================================================================
+	// NEW: TEAM MEMBER MANAGEMENT USE CASES
+	// ========================================================================
+
+	c.InviteMemberUC = appTeam.NewInviteMemberUseCase(
+		teamRepo,
+		memberRepo,
+		userRepo,
+		c.EmailService,
+		c.Logger,
+	)
+
+	c.RemoveMemberUC = appTeam.NewRemoveMemberUseCase(
+		teamRepo,
+		memberRepo,
+		c.Logger,
+	)
+
+	c.UpdateMemberRoleUC = appTeam.NewUpdateMemberRoleUseCase(
+		teamRepo,
+		memberRepo,
+		userRepo,
+		c.Logger,
+	)
+
 	return nil
 }
 
@@ -203,13 +229,16 @@ func (c *Container) initializeHandlers() error {
 		c.DeleteUserUC,
 	)
 
-	// Team Handler
+	// Team Handler (WITH NEW MEMBER MANAGEMENT USE CASES)
 	c.TeamHandler = handlers.NewTeamHandler(
 		c.CreateTeamUC,
 		c.GetTeamUC,
 		c.UpdateTeamUC,
 		c.DeleteTeamUC,
 		c.ListTeamsUC,
+		c.InviteMemberUC,     // NEW
+		c.RemoveMemberUC,     // NEW
+		c.UpdateMemberRoleUC, // NEW
 	)
 
 	return nil

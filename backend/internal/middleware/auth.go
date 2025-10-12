@@ -1,5 +1,4 @@
 // path: backend/internal/middleware/auth.go
-
 package middleware
 
 import (
@@ -8,8 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-
-	"github.com/techappsUT/social-queue/internal/auth"
+	"github.com/techappsUT/social-queue/internal/application/common"
 )
 
 type contextKey string
@@ -21,11 +19,13 @@ const (
 	TeamIDKey    contextKey = "team_id"
 )
 
+// AuthMiddleware handles JWT authentication
 type AuthMiddleware struct {
-	tokenService *auth.TokenService
+	tokenService common.TokenService
 }
 
-func NewAuthMiddleware(tokenService *auth.TokenService) *AuthMiddleware {
+// NewAuthMiddleware creates a new auth middleware
+func NewAuthMiddleware(tokenService common.TokenService) *AuthMiddleware {
 	return &AuthMiddleware{
 		tokenService: tokenService,
 	}
@@ -36,26 +36,21 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			http.Error(w, `{"error":"Authorization header required"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// Extract token from "Bearer <token>"
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
+			http.Error(w, `{"error":"Invalid authorization header format"}`, http.StatusUnauthorized)
 			return
 		}
 
 		token := parts[1]
 		claims, err := m.tokenService.ValidateAccessToken(token)
 		if err != nil {
-			switch err {
-			case auth.ErrExpiredToken:
-				http.Error(w, "Token has expired", http.StatusUnauthorized)
-			default:
-				http.Error(w, "Invalid token", http.StatusUnauthorized)
-			}
+			http.Error(w, `{"error":"Invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
 
@@ -64,7 +59,9 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
 		ctx = context.WithValue(ctx, UserEmailKey, claims.Email)
 		ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
-		ctx = context.WithValue(ctx, TeamIDKey, claims.TeamID)
+		if claims.TeamID != "" {
+			ctx = context.WithValue(ctx, TeamIDKey, claims.TeamID)
+		}
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -96,39 +93,66 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
 		ctx = context.WithValue(ctx, UserEmailKey, claims.Email)
 		ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
-		ctx = context.WithValue(ctx, TeamIDKey, claims.TeamID)
+		if claims.TeamID != "" {
+			ctx = context.WithValue(ctx, TeamIDKey, claims.TeamID)
+		}
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// Helper functions to extract user info from context
-func GetUserID(ctx context.Context) (uuid.UUID, error) {
-	userIDStr, ok := ctx.Value(UserIDKey).(string)
-	if !ok {
-		return uuid.Nil, auth.ErrInvalidToken
-	}
-	return uuid.Parse(userIDStr)
+// RequireAdmin ensures the user has admin role
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role, ok := GetUserRole(r.Context())
+		if !ok || role != "admin" {
+			http.Error(w, `{"error":"Admin access required"}`, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
+// Helper functions to extract user info from context
+
+// GetUserID extracts user ID from context
+func GetUserID(ctx context.Context) (uuid.UUID, bool) {
+	userIDStr, ok := ctx.Value(UserIDKey).(string)
+	if !ok {
+		return uuid.Nil, false
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return uuid.Nil, false
+	}
+
+	return userID, true
+}
+
+// GetUserEmail extracts user email from context
 func GetUserEmail(ctx context.Context) (string, bool) {
 	email, ok := ctx.Value(UserEmailKey).(string)
 	return email, ok
 }
 
+// GetUserRole extracts user role from context
 func GetUserRole(ctx context.Context) (string, bool) {
 	role, ok := ctx.Value(UserRoleKey).(string)
 	return role, ok
 }
 
-func GetTeamID(ctx context.Context) (*uuid.UUID, error) {
+// GetTeamID extracts team ID from context
+func GetTeamID(ctx context.Context) (uuid.UUID, bool) {
 	teamIDStr, ok := ctx.Value(TeamIDKey).(string)
-	if !ok || teamIDStr == "" {
-		return nil, nil
+	if !ok {
+		return uuid.Nil, false
 	}
+
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, false
 	}
-	return &teamID, nil
+
+	return teamID, true
 }

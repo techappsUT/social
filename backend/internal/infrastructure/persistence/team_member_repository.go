@@ -1,5 +1,6 @@
 // ============================================================================
-// FILE 1: backend/internal/infrastructure/persistence/team_member_repository.go
+// FILE: backend/internal/infrastructure/persistence/team_member_repository.go
+// FIXED VERSION - Corrected sql.NullTime to time.Time conversion
 // ============================================================================
 package persistence
 
@@ -103,6 +104,20 @@ func (r *TeamMemberRepository) FindMember(ctx context.Context, teamID, userID uu
 		return nil, fmt.Errorf("failed to find member: %w", err)
 	}
 
+	// FIXED: Convert sql.NullTime to time.Time and *time.Time
+	var createdAt time.Time
+	if dbMember.CreatedAt.Valid {
+		createdAt = dbMember.CreatedAt.Time
+	} else {
+		createdAt = time.Now().UTC()
+	}
+
+	var joinedAt *time.Time
+	if dbMember.CreatedAt.Valid {
+		t := dbMember.CreatedAt.Time
+		joinedAt = &t
+	}
+
 	// Reconstruct domain member
 	role := team.MemberRole(dbMember.RoleName)
 	member := team.ReconstructMember(
@@ -112,9 +127,9 @@ func (r *TeamMemberRepository) FindMember(ctx context.Context, teamID, userID uu
 		role,
 		team.MemberStatusActive, // Assuming active if found
 		uuid.Nil,                // invitedBy - not in current schema
-		dbMember.CreatedAt,
-		&dbMember.CreatedAt, // joinedAt
-		nil,                 // leftAt
+		createdAt,               // FIXED: Now using time.Time
+		joinedAt,                // FIXED: Now using *time.Time
+		nil,                     // leftAt
 	)
 
 	return member, nil
@@ -133,6 +148,20 @@ func (r *TeamMemberRepository) FindTeamMembers(ctx context.Context, teamID uuid.
 
 	members := make([]*team.Member, 0, len(dbMembers))
 	for _, dbMember := range dbMembers {
+		// FIXED: Convert sql.NullTime to time.Time and *time.Time
+		var createdAt time.Time
+		if dbMember.CreatedAt.Valid {
+			createdAt = dbMember.CreatedAt.Time
+		} else {
+			createdAt = time.Now().UTC()
+		}
+
+		var joinedAt *time.Time
+		if dbMember.CreatedAt.Valid {
+			t := dbMember.CreatedAt.Time
+			joinedAt = &t
+		}
+
 		role := team.MemberRole(dbMember.RoleName)
 		member := team.ReconstructMember(
 			dbMember.ID,
@@ -141,8 +170,8 @@ func (r *TeamMemberRepository) FindTeamMembers(ctx context.Context, teamID uuid.
 			role,
 			team.MemberStatusActive,
 			uuid.Nil,
-			dbMember.CreatedAt,
-			&dbMember.CreatedAt,
+			createdAt, // FIXED: Now using time.Time
+			joinedAt,  // FIXED: Now using *time.Time
 			nil,
 		)
 		members = append(members, member)

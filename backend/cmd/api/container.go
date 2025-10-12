@@ -1,4 +1,7 @@
-// path: backend/cmd/api/container.go
+// ============================================================================
+// FILE: backend/cmd/api/container.go
+// FIXED: NewInMemoryCacheService and DeleteUserUseCase with TokenService
+// ============================================================================
 package main
 
 import (
@@ -108,7 +111,8 @@ func (c *Container) initializeUseCases() error {
 	userService := userDomain.NewService(userRepo)
 
 	// Cache Service
-	cacheService := services.NewInMemoryCache()
+	// FIXED: Changed from NewInMemoryCache() to NewInMemoryCacheService()
+	cacheService := services.NewInMemoryCacheService()
 
 	// ========================================================================
 	// USER USE CASES
@@ -140,8 +144,10 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
+	// FIXED: Added c.TokenService as second parameter
 	c.DeleteUserUC = appUser.NewDeleteUserUseCase(
 		userRepo,
+		c.TokenService,
 		c.Logger,
 	)
 

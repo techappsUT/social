@@ -1,9 +1,12 @@
-// path: backend/cmd/api/router.go
+// ============================================================================
+// FILE: backend/cmd/api/router.go
+// FIXED: Removed TeamHandler methods that don't exist yet
+// (InviteMember, RemoveMember, UpdateMemberRole)
+// ============================================================================
 package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -72,10 +75,11 @@ func setupRouter(container *Container) *chi.Mux {
 				r.Put("/{id}", container.TeamHandler.UpdateTeam)    // Update team
 				r.Delete("/{id}", container.TeamHandler.DeleteTeam) // Delete team
 
-				// Team member management
-				r.Post("/{id}/members", container.TeamHandler.InviteMember)                    // Invite member
-				r.Delete("/{id}/members/{userId}", container.TeamHandler.RemoveMember)         // Remove member
-				r.Patch("/{id}/members/{userId}/role", container.TeamHandler.UpdateMemberRole) // Update role
+				// REMOVED: Team member management methods - these use cases haven't been implemented yet
+				// TODO: Implement these in future iteration:
+				// - POST /{id}/members - InviteMember
+				// - DELETE /{id}/members/{userId} - RemoveMember
+				// - PATCH /{id}/members/{userId}/role - UpdateMemberRole
 			})
 
 			// Admin routes
@@ -112,57 +116,56 @@ func handleRoot(c *Container) http.HandlerFunc {
 	}
 }
 
-// handleHealth performs health check including database ping
+// handleHealth returns system health status
 func handleHealth(c *Container) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Test database connection
-		dbStatus := "ok"
-		if err := c.DB.PingContext(r.Context()); err != nil {
-			dbStatus = "error"
-		}
-
-		response := map[string]interface{}{
-			"status":      "ok",
-			"database":    dbStatus,
-			"service":     "socialqueue-api",
-			"environment": c.Config.Environment,
-			"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		}
-
-		if dbStatus == "error" {
-			respondJSON(w, http.StatusServiceUnavailable, response)
+		ctx := r.Context()
+		if err := c.DB.PingContext(ctx); err != nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"status":   "unhealthy",
+				"database": "down",
+				"error":    err.Error(),
+			})
 			return
 		}
 
-		respondJSON(w, http.StatusOK, response)
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "healthy",
+			"database":    "up",
+			"environment": c.Config.Environment,
+			"timestamp":   time.Now().Unix(),
+		})
 	}
 }
 
-// handleMe returns current authenticated user information
+// handleMe returns the current authenticated user's info
 func handleMe(w http.ResponseWriter, r *http.Request) {
-	userID, _ := appMiddleware.GetUserID(r.Context())
+	userID, ok := appMiddleware.GetUserID(r.Context())
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	email, _ := appMiddleware.GetUserEmail(r.Context())
 	role, _ := appMiddleware.GetUserRole(r.Context())
 
-	response := map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"userId": userID.String(),
 		"email":  email,
 		"role":   role,
-	}
-	respondJSON(w, http.StatusOK, response)
+	})
 }
 
-// handleAdminUsers placeholder for admin users endpoint
+// handleAdminUsers is a placeholder for admin user management
 func handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-	response := map[string]interface{}{
-		"users": []interface{}{},
-		"total": 0,
-	}
-	respondJSON(w, http.StatusOK, response)
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Admin users endpoint - to be implemented",
+	})
 }
 
 // ============================================================================
-// HELPER FUNCTIONS
+// RESPONSE HELPERS
 // ============================================================================
 
 // respondJSON sends a JSON response
@@ -170,6 +173,14 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
+}
+
+// respondError sends an error response
+func respondError(w http.ResponseWriter, status int, message string) {
+	respondJSON(w, status, map[string]string{
+		"error":   http.StatusText(status),
+		"message": message,
+	})
 }

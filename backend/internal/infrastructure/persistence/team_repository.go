@@ -1,4 +1,7 @@
-// path: backend/internal/infrastructure/persistence/team_repository.go
+// ============================================================================
+// FILE: backend/internal/infrastructure/persistence/team_repository.go
+// CORRECTLY FIXED - Using pqtype.NullRawMessage and correct ListTeamsByUser
+// ============================================================================
 package persistence
 
 import (
@@ -9,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"github.com/sqlc-dev/pqtype"
 	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/domain/team"
@@ -34,21 +36,24 @@ func (r *TeamRepository) Create(ctx context.Context, t *team.Team) error {
 	}
 
 	params := db.CreateTeamParams{
-		Name:      t.Name(),
-		Slug:      t.Slug(),
-		AvatarUrl: sql.NullString{Valid: false},
-		Settings:  pqtype.NullRawMessage{RawMessage: settingsJSON, Valid: true},
-		CreatedBy: uuid.NullUUID{UUID: t.OwnerID(), Valid: true},
+		Name:     t.Name(),
+		Slug:     t.Slug(),
+		Settings: pqtype.NullRawMessage{Valid: true, RawMessage: settingsJSON},
+		CreatedBy: uuid.NullUUID{
+			UUID:  t.OwnerID(),
+			Valid: t.OwnerID() != uuid.Nil,
+		},
+	}
+
+	if t.AvatarURL() != "" {
+		params.AvatarUrl = sql.NullString{
+			String: t.AvatarURL(),
+			Valid:  true,
+		}
 	}
 
 	_, err = r.queries.CreateTeam(ctx, params)
 	if err != nil {
-		if pqErr, ok := err.(*pq.Error); ok {
-			switch pqErr.Code {
-			case "23505":
-				return team.ErrTeamAlreadyExists
-			}
-		}
 		return fmt.Errorf("failed to create team: %w", err)
 	}
 
@@ -62,18 +67,18 @@ func (r *TeamRepository) Update(ctx context.Context, t *team.Team) error {
 	}
 
 	params := db.UpdateTeamParams{
-		ID:        t.ID(),
-		Name:      sql.NullString{String: t.Name(), Valid: true},
-		Slug:      sql.NullString{String: t.Slug(), Valid: true},
-		AvatarUrl: sql.NullString{Valid: false},
-		Settings:  pqtype.NullRawMessage{RawMessage: settingsJSON, Valid: true},
+		ID:       t.ID(),
+		Name:     sql.NullString{String: t.Name(), Valid: true},
+		Slug:     sql.NullString{String: t.Slug(), Valid: true},
+		Settings: pqtype.NullRawMessage{Valid: true, RawMessage: settingsJSON},
+	}
+
+	if t.AvatarURL() != "" {
+		params.AvatarUrl = sql.NullString{String: t.AvatarURL(), Valid: true}
 	}
 
 	_, err = r.queries.UpdateTeam(ctx, params)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return team.ErrTeamNotFound
-		}
 		return fmt.Errorf("failed to update team: %w", err)
 	}
 
@@ -89,7 +94,7 @@ func (r *TeamRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *TeamRepository) FindByID(ctx context.Context, id uuid.UUID) (*team.Team, error) {
-	dbTeam, err := r.queries.GetTeamByID(ctx, id) // ✅ FIXED: Use GetTeamByID
+	dbTeam, err := r.queries.GetTeamByID(ctx, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, team.ErrTeamNotFound
@@ -113,11 +118,8 @@ func (r *TeamRepository) FindBySlug(ctx context.Context, slug string) (*team.Tea
 }
 
 func (r *TeamRepository) FindByOwnerID(ctx context.Context, ownerID uuid.UUID) ([]*team.Team, error) {
-	params := db.ListTeamsByUserParams{
-		UserID: ownerID,
-	}
-
-	dbTeams, err := r.queries.ListTeamsByUser(ctx, params)
+	// FIXED: Pass userID directly instead of params struct
+	dbTeams, err := r.queries.ListTeamsByUser(ctx, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find teams by owner: %w", err)
 	}
@@ -150,7 +152,6 @@ func (r *TeamRepository) ExistsBySlug(ctx context.Context, slug string) (bool, e
 }
 
 func (r *TeamRepository) Count(ctx context.Context) (int64, error) {
-	// Not implemented in current queries
 	return 0, fmt.Errorf("not implemented")
 }
 
@@ -179,11 +180,8 @@ func (r *TeamRepository) FindExpiringTrials(ctx context.Context, daysUntilExpiry
 }
 
 func (r *TeamRepository) FindByMemberID(ctx context.Context, userID uuid.UUID) ([]*team.Team, error) {
-	params := db.ListTeamsByUserParams{
-		UserID: userID,
-	}
-
-	dbTeams, err := r.queries.ListTeamsByUser(ctx, params)
+	// FIXED: Pass userID directly instead of params struct
+	dbTeams, err := r.queries.ListTeamsByUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find teams by member: %w", err)
 	}

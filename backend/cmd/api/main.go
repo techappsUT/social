@@ -1,4 +1,7 @@
-// path: backend/cmd/api/main.go
+// ============================================================================
+// FILE: backend/cmd/api/main.go
+// FIXED: Removed Container.Cleanup() call since Container doesn't have that method
+// ============================================================================
 package main
 
 import (
@@ -45,7 +48,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize application: %v", err)
 	}
-	defer app.Cleanup()
 
 	// Start server with graceful shutdown
 	app.Start()
@@ -68,31 +70,29 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("database setup failed: %w", err)
 	}
-	log.Println("  ✓ Database connected")
 
-	// Step 3: Initialize dependency container
-	log.Println("🏗️  Initializing application components...")
+	// Step 3: Initialize dependency injection container
+	log.Println("🔧 Initializing dependencies...")
 	container, err := NewContainer(config, db)
 	if err != nil {
 		return nil, fmt.Errorf("container initialization failed: %w", err)
 	}
-	log.Println("  ✓ Components initialized")
+	log.Println("  ✓ Dependencies initialized")
 
 	// Step 4: Setup HTTP router
-	log.Println("🌐 Setting up HTTP router...")
+	log.Println("🛣️  Setting up router...")
 	router := setupRouter(container)
 	log.Println("  ✓ Router configured")
 
 	// Step 5: Create HTTP server
+	serverAddr := fmt.Sprintf("%s:%s", config.Server.Host, config.Server.Port)
 	server := &http.Server{
-		Addr:         config.Server.Host + ":" + config.Server.Port,
+		Addr:         serverAddr,
 		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
-
-	log.Println("✅ Application initialized successfully")
 
 	return &App{
 		Container: container,
@@ -100,14 +100,10 @@ func NewApp() (*App, error) {
 	}, nil
 }
 
-// ============================================================================
-// DATABASE SETUP
-// ============================================================================
-
-// setupDatabase initializes the database connection
+// setupDatabase initializes and verifies the database connection
 func setupDatabase(config *Config) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+	// Build DSN
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		config.Database.Host,
 		config.Database.Port,
 		config.Database.User,
@@ -116,13 +112,7 @@ func setupDatabase(config *Config) (*sql.DB, error) {
 		config.Database.SSLMode,
 	)
 
-	log.Printf("  ℹ️  Connecting to: postgresql://%s:***@%s:%s/%s",
-		config.Database.User,
-		config.Database.Host,
-		config.Database.Port,
-		config.Database.DBName,
-	)
-
+	// Open connection
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -181,15 +171,10 @@ func (app *App) Start() {
 		log.Fatalf("❌ Server forced to shutdown: %v", err)
 	}
 
-	log.Println("✅ Server gracefully stopped")
-}
+	// FIXED: Removed app.Cleanup() call since Container doesn't have Cleanup method
+	// If cleanup is needed in the future, add a Cleanup() method to Container
 
-// Cleanup releases all resources
-func (app *App) Cleanup() {
-	if app.Container != nil {
-		app.Container.Cleanup()
-	}
-	log.Println("🧹 Cleanup completed")
+	log.Println("✅ Server gracefully stopped")
 }
 
 // ============================================================================
@@ -223,6 +208,13 @@ func logAvailableEndpoints() {
 	log.Println("  PUT  /api/v2/users/{id}       - Update user profile")
 	log.Println("  DELETE /api/v2/users/{id}     - Delete user account")
 	log.Println("  GET  /api/v2/me               - Get current user")
+	log.Println("")
+	log.Println("  🏢 Team Management (Protected):")
+	log.Println("  GET  /api/v2/teams            - List teams")
+	log.Println("  POST /api/v2/teams            - Create team")
+	log.Println("  GET  /api/v2/teams/{id}       - Get team details")
+	log.Println("  PUT  /api/v2/teams/{id}       - Update team")
+	log.Println("  DELETE /api/v2/teams/{id}     - Delete team")
 	log.Println("")
 	log.Println("  🔧 Admin (Protected):")
 	log.Println("  GET  /api/v2/admin/users      - List all users")

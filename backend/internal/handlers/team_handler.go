@@ -1,4 +1,7 @@
-// path: backend/internal/handlers/team_handler.go
+// ============================================================================
+// FILE: backend/internal/handlers/team_handler.go
+// CORRECTLY FIXED - middleware.GetUserID returns (uuid.UUID, bool) not error
+// ============================================================================
 package handlers
 
 import (
@@ -37,8 +40,9 @@ func NewTeamHandler(
 
 // CreateTeam handles POST /api/v2/teams
 func (h *TeamHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
-	userID, err := middleware.GetUserID(r.Context())
-	if err != nil {
+	// FIXED: GetUserID returns (uuid.UUID, bool) not (uuid.UUID, error)
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -62,8 +66,9 @@ func (h *TeamHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 
 // GetTeam handles GET /api/v2/teams/:id
 func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
-	userID, err := middleware.GetUserID(r.Context())
-	if err != nil {
+	// FIXED: GetUserID returns (uuid.UUID, bool) not (uuid.UUID, error)
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -95,8 +100,9 @@ func (h *TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 
 // UpdateTeam handles PUT /api/v2/teams/:id
 func (h *TeamHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
-	userID, err := middleware.GetUserID(r.Context())
-	if err != nil {
+	// FIXED: GetUserID returns (uuid.UUID, bool) not (uuid.UUID, error)
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -132,8 +138,9 @@ func (h *TeamHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 
 // DeleteTeam handles DELETE /api/v2/teams/:id
 func (h *TeamHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
-	userID, err := middleware.GetUserID(r.Context())
-	if err != nil {
+	// FIXED: GetUserID returns (uuid.UUID, bool) not (uuid.UUID, error)
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -164,8 +171,9 @@ func (h *TeamHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 
 // ListTeams handles GET /api/v2/teams
 func (h *TeamHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
-	userID, err := middleware.GetUserID(r.Context())
-	if err != nil {
+	// FIXED: GetUserID returns (uuid.UUID, bool) not (uuid.UUID, error)
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}

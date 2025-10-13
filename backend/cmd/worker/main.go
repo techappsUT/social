@@ -20,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/techappsUT/social-queue/internal/application/common"
+	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/infrastructure/persistence"
 	"github.com/techappsUT/social-queue/internal/infrastructure/services"
 )
@@ -62,10 +63,10 @@ func main() {
 // NewWorkerApp initializes the worker application
 func NewWorkerApp() (*WorkerApp, error) {
 	// Initialize logger
-	logger := services.NewConsoleLogger()
+	logger := services.NewLogger() // ✅ FIXED: Use NewLogger() instead of NewConsoleLogger()
 
 	// Connect to PostgreSQL
-	db, err := connectDatabase()
+	database, err := connectDatabase()
 	if err != nil {
 		return nil, fmt.Errorf("database connection failed: %w", err)
 	}
@@ -80,20 +81,20 @@ func NewWorkerApp() (*WorkerApp, error) {
 
 	// Initialize services
 	queueService := services.NewWorkerQueueService(redisClient, logger)
-	queries := db.New(db)
+	queries := db.New(database) // ✅ FIXED: Use 'database' variable instead of 'db'
 
 	// Initialize repositories
-	postRepo := persistence.NewPostRepository(db, queries)
+	postRepo := persistence.NewPostRepository(database, queries)
 
 	// Initialize job processors
 	processors := []JobProcessor{
 		NewPublishPostProcessor(postRepo, queueService, logger),
 		NewFetchAnalyticsProcessor(postRepo, queueService, logger),
-		NewCleanupProcessor(db, queueService, logger),
+		NewCleanupProcessor(database, queueService, logger),
 	}
 
 	return &WorkerApp{
-		DB:           db,
+		DB:           database,
 		Redis:        redisClient,
 		Logger:       logger,
 		QueueService: queueService,

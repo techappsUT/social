@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/techappsUT/social-queue/internal/application/common"
 	"github.com/techappsUT/social-queue/internal/domain/post"
 	"github.com/techappsUT/social-queue/internal/infrastructure/services"
@@ -83,108 +82,78 @@ func (p *FetchAnalyticsProcessor) fetchAnalytics(ctx context.Context) error {
 	p.logger.Info("Starting analytics fetch...")
 
 	// Find published posts that need analytics update
-	// (published more than 1 hour ago, no analytics in last 6 hours)
-	publishedPosts, err := p.postRepo.FindPublished(ctx, uuid.Nil, 0, 100)
+	// (typically posts published in last 30 days)
+	// Fetch up to 100 published posts at a time
+	offset := 0
+	limit := 100
+	posts, err := p.postRepo.FindByStatus(ctx, post.StatusPublished, offset, limit)
 	if err != nil {
 		return fmt.Errorf("failed to find published posts: %w", err)
 	}
 
-	if len(publishedPosts) == 0 {
-		p.logger.Info("No published posts found for analytics fetch")
+	if len(posts) == 0 {
+		p.logger.Info("No published posts to fetch analytics for")
 		return nil
 	}
 
-	p.logger.Info(fmt.Sprintf("Fetching analytics for %d posts", len(publishedPosts)))
+	p.logger.Info(fmt.Sprintf("Found %d published posts to fetch analytics for", len(posts)))
 
 	successCount := 0
-	errorCount := 0
+	failureCount := 0
 
-	for _, publishedPost := range publishedPosts {
-		if err := p.fetchPostAnalytics(ctx, publishedPost); err != nil {
-			p.logger.Error(fmt.Sprintf("Failed to fetch analytics for post %s: %v", publishedPost.ID(), err))
-			errorCount++
+	for _, post := range posts {
+		if err := p.fetchPostAnalytics(ctx, post); err != nil {
+			p.logger.Error(fmt.Sprintf("Failed to fetch analytics for post %s: %v", post.ID(), err))
+			failureCount++
 			continue
 		}
 		successCount++
 	}
 
-	p.logger.Info(fmt.Sprintf("Analytics fetch complete: %d success, %d errors", successCount, errorCount))
+	p.logger.Info(fmt.Sprintf("✅ Analytics fetch completed: %d succeeded, %d failed", successCount, failureCount))
 	return nil
 }
 
 // fetchPostAnalytics fetches analytics for a single post
-func (p *FetchAnalyticsProcessor) fetchPostAnalytics(ctx context.Context, publishedPost *post.Post) error {
-	postID := publishedPost.ID()
+func (p *FetchAnalyticsProcessor) fetchPostAnalytics(ctx context.Context, postEntity *post.Post) error {
+	postID := postEntity.ID()
 
-	p.logger.Info(fmt.Sprintf("Fetching analytics for post %s", postID))
+	// TODO: Call social platform API to fetch real metrics
+	// For now, we'll simulate with placeholder data
 
-	// TODO: Actually fetch from social platforms
-	// This would involve:
-	// 1. Get social account tokens
-	// 2. Call platform APIs (Twitter Analytics, LinkedIn Insights, etc.)
-	// 3. Parse response and extract metrics
-	// 4. Store in analytics_events table
-
-	// Simulate fetching analytics (in real implementation, use social adapters)
-	time.Sleep(1 * time.Second)
-
-	// Create mock analytics data
+	// ✅ FIXED: Use correct Analytics struct fields
 	analytics := post.Analytics{
-		Impressions:    1000,
-		Engagements:    50,
-		Likes:          30,
-		Comments:       5,
-		Shares:         10,
-		Clicks:         15,
-		EngagementRate: 5.0,
-		FetchedAt:      time.Now().UTC(),
+		Impressions: 1000,
+		Clicks:      50,
+		Likes:       25,
+		Shares:      5,
+		Comments:    3,
+		Reach:       800,
+		Engagement:  0.033,            // (25 + 5 + 3) / 1000 = 0.033 or 3.3%
+		LastUpdated: time.Now().UTC(), // ✅ FIXED: Use LastUpdated instead of FetchedAt
 	}
 
-	// Update post with analytics
-	publishedPost.UpdateAnalytics(analytics)
+	// Update post with new analytics
+	postEntity.UpdateAnalytics(analytics)
 
-	if err := p.postRepo.Update(ctx, publishedPost); err != nil {
-		return fmt.Errorf("failed to update post with analytics: %w", err)
+	// Save to database
+	if err := p.postRepo.Update(ctx, postEntity); err != nil {
+		return fmt.Errorf("failed to save analytics: %w", err)
 	}
 
-	p.logger.Info(fmt.Sprintf("✅ Updated analytics for post %s (impressions: %d, engagements: %d)",
-		postID, analytics.Impressions, analytics.Engagements))
+	// ✅ FIXED: Calculate total engagement from individual metrics
+	totalEngagement := analytics.Likes + analytics.Shares + analytics.Comments
+	p.logger.Info(fmt.Sprintf("✓ Updated analytics for post %s: %d impressions, %d total engagements",
+		postID, analytics.Impressions, totalEngagement))
 
 	return nil
 }
 
-// fetchTwitterAnalytics fetches analytics from Twitter (placeholder)
-func (p *FetchAnalyticsProcessor) fetchTwitterAnalytics(ctx context.Context, platformPostID string) (map[string]interface{}, error) {
-	// TODO: Implement Twitter Analytics API call
-	return map[string]interface{}{
-		"impressions": 1000,
-		"engagements": 50,
-		"likes":       30,
-		"retweets":    10,
-		"replies":     5,
-	}, nil
-}
-
-// fetchLinkedInAnalytics fetches analytics from LinkedIn (placeholder)
-func (p *FetchAnalyticsProcessor) fetchLinkedInAnalytics(ctx context.Context, platformPostID string) (map[string]interface{}, error) {
-	// TODO: Implement LinkedIn Insights API call
-	return map[string]interface{}{
-		"impressions": 800,
-		"engagements": 40,
-		"likes":       25,
-		"comments":    5,
-		"shares":      10,
-	}, nil
-}
-
-// fetchFacebookAnalytics fetches analytics from Facebook (placeholder)
-func (p *FetchAnalyticsProcessor) fetchFacebookAnalytics(ctx context.Context, platformPostID string) (map[string]interface{}, error) {
-	// TODO: Implement Facebook Insights API call
-	return map[string]interface{}{
-		"impressions": 1200,
-		"engagements": 60,
-		"likes":       35,
-		"comments":    8,
-		"shares":      12,
-	}, nil
+// Helper function to calculate engagement rate
+func calculateEngagementRate(impressions, likes, shares, comments int) float64 {
+	if impressions == 0 {
+		return 0.0
+	}
+	totalEngagement := likes + shares + comments
+	return float64(totalEngagement) / float64(impressions)
 }

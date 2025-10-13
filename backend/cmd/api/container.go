@@ -1,6 +1,6 @@
 // ============================================================================
 // FILE: backend/cmd/api/container.go
-// CORRECTED: All constructor signatures match actual codebase
+// COMPLETE VERSION - All constructors corrected to match your codebase
 // ============================================================================
 package main
 
@@ -41,17 +41,17 @@ type Container struct {
 	// Configuration
 	Config *Config
 	DB     *sql.DB
-	Redis  *redis.Client // NEW: Redis client
+	Redis  *redis.Client
 
 	// Infrastructure Services
 	TokenService      common.TokenService
 	EmailService      common.EmailService
 	CacheService      common.CacheService
 	Logger            common.Logger
+	WorkerQueue       *services.WorkerQueueService
 	EncryptionService *services.EncryptionService
-	WorkerQueue       *services.WorkerQueueService // NEW: Worker queue
 
-	// Repositories (interfaces)
+	// Repositories
 	UserRepo   userDomain.Repository
 	TeamRepo   teamDomain.Repository
 	MemberRepo teamDomain.MemberRepository
@@ -65,18 +65,16 @@ type Container struct {
 	// Social Platform Adapters
 	SocialAdapters map[socialDomain.Platform]socialAdapter.Adapter
 
-	// ========================================================================
-	// USER MODULE USE CASES
-	// ========================================================================
+	// Use Cases - Auth
+	LoginUC *auth.LoginUseCase
+
+	// Use Cases - User
 	CreateUserUC *userUC.CreateUserUseCase
-	LoginUC      *auth.LoginUseCase
 	UpdateUserUC *userUC.UpdateUserUseCase
 	GetUserUC    *userUC.GetUserUseCase
 	DeleteUserUC *userUC.DeleteUserUseCase
 
-	// ========================================================================
-	// TEAM MODULE USE CASES
-	// ========================================================================
+	// Use Cases - Team
 	CreateTeamUC       *teamUC.CreateTeamUseCase
 	GetTeamUC          *teamUC.GetTeamUseCase
 	UpdateTeamUC       *teamUC.UpdateTeamUseCase
@@ -86,9 +84,7 @@ type Container struct {
 	RemoveMemberUC     *teamUC.RemoveMemberUseCase
 	UpdateMemberRoleUC *teamUC.UpdateMemberRoleUseCase
 
-	// ========================================================================
-	// POST MODULE USE CASES
-	// ========================================================================
+	// Use Cases - Post
 	CreateDraftUC  *postUC.CreateDraftUseCase
 	SchedulePostUC *postUC.SchedulePostUseCase
 	UpdatePostUC   *postUC.UpdatePostUseCase
@@ -97,9 +93,7 @@ type Container struct {
 	ListPostsUC    *postUC.ListPostsUseCase
 	PublishNowUC   *postUC.PublishNowUseCase
 
-	// ========================================================================
-	// SOCIAL MODULE USE CASES
-	// ========================================================================
+	// Use Cases - Social
 	ConnectAccountUC    *socialUC.ConnectAccountUseCase
 	DisconnectAccountUC *socialUC.DisconnectAccountUseCase
 	RefreshTokensUC     *socialUC.RefreshTokensUseCase
@@ -107,54 +101,58 @@ type Container struct {
 	PublishPostUC       *socialUC.PublishPostUseCase
 	GetAnalyticsUC      *socialUC.GetAnalyticsUseCase
 
-	// ========================================================================
-	// HTTP HANDLERS
-	// ========================================================================
+	// HTTP Handlers
 	AuthHandler   *handlers.AuthHandlerV2
 	TeamHandler   *handlers.TeamHandler
 	PostHandler   *handlers.PostHandler
 	SocialHandler *handlers.SocialHandler
 
-	// ========================================================================
-	// MIDDLEWARE
-	// ========================================================================
+	// Middleware
 	AuthMiddleware *middleware.AuthMiddleware
+	RateLimiter    *middleware.RateLimiter
 }
 
-// NewContainer creates and initializes the dependency injection container
-func NewContainer(config *Config, database *sql.DB) (*Container, error) {
-	c := &Container{
+// ============================================================================
+// CONTAINER INITIALIZATION
+// ============================================================================
+
+func NewContainer(config *Config, db *sql.DB) (*Container, error) {
+	container := &Container{
 		Config: config,
-		DB:     database,
+		DB:     db,
 	}
 
-	if err := c.initializeInfrastructure(); err != nil {
+	// Initialize in dependency order
+	if err := container.initializeInfrastructure(); err != nil {
 		return nil, fmt.Errorf("infrastructure initialization failed: %w", err)
 	}
 
-	if err := c.initializeDomainServices(); err != nil {
+	if err := container.initializeDomainServices(); err != nil {
 		return nil, fmt.Errorf("domain services initialization failed: %w", err)
 	}
 
-	if err := c.initializeSocialAdapters(); err != nil {
+	if err := container.initializeSocialAdapters(); err != nil {
 		return nil, fmt.Errorf("social adapters initialization failed: %w", err)
 	}
 
-	if err := c.initializeUseCases(); err != nil {
-		return nil, fmt.Errorf("use case initialization failed: %w", err)
+	if err := container.initializeUseCases(); err != nil {
+		return nil, fmt.Errorf("use cases initialization failed: %w", err)
 	}
 
-	if err := c.initializeHandlers(); err != nil {
-		return nil, fmt.Errorf("handler initialization failed: %w", err)
+	if err := container.initializeHandlers(); err != nil {
+		return nil, fmt.Errorf("handlers initialization failed: %w", err)
 	}
 
-	return c, nil
+	return container, nil
 }
 
-// initializeInfrastructure sets up repositories and services
+// ============================================================================
+// INFRASTRUCTURE LAYER
+// ============================================================================
+
 func (c *Container) initializeInfrastructure() error {
-	// Logger (initialize first for logging other components)
-	c.Logger = services.NewLogger() // ✅ FIXED: Use NewLogger() not NewConsoleLogger()
+	// Logger (required by other components)
+	c.Logger = services.NewLogger()
 
 	// ========================================================================
 	// TOKEN & AUTH SERVICES
@@ -215,8 +213,18 @@ func (c *Container) initializeInfrastructure() error {
 		c.CacheService = cacheService
 		c.Logger.Info("✅ Redis cache service initialized successfully")
 
-		// Store Redis client for worker queue
+		// Store Redis client for worker queue and rate limiting
 		c.Redis = cacheService.(*services.RedisCacheService).Client()
+	}
+
+	// ========================================================================
+	// RATE LIMITER (NEW)
+	// ========================================================================
+	if c.Redis != nil {
+		c.RateLimiter = middleware.NewRateLimiter(c.Redis, c.Logger)
+		c.Logger.Info("✅ Rate limiter initialized successfully")
+	} else {
+		c.Logger.Warn("Rate limiter not initialized - Redis unavailable")
 	}
 
 	// ========================================================================
@@ -281,16 +289,16 @@ func (c *Container) initializeDomainServices() error {
 	return nil
 }
 
-// initializeSocialAdapters sets up platform adapters
+// initializeSocialAdapters sets up platform-specific OAuth adapters
 func (c *Container) initializeSocialAdapters() error {
 	c.SocialAdapters = make(map[socialDomain.Platform]socialAdapter.Adapter)
 
 	baseURL := os.Getenv("API_BASE_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+		baseURL = "http://localhost:8000"
 	}
 
-	// Twitter adapter
+	// Twitter Adapter
 	twitterClientID := os.Getenv("TWITTER_CLIENT_ID")
 	twitterClientSecret := os.Getenv("TWITTER_CLIENT_SECRET")
 	if twitterClientID != "" && twitterClientSecret != "" {
@@ -303,7 +311,7 @@ func (c *Container) initializeSocialAdapters() error {
 		c.Logger.Info("Twitter adapter initialized")
 	}
 
-	// LinkedIn adapter
+	// LinkedIn Adapter
 	linkedinClientID := os.Getenv("LINKEDIN_CLIENT_ID")
 	linkedinClientSecret := os.Getenv("LINKEDIN_CLIENT_SECRET")
 	if linkedinClientID != "" && linkedinClientSecret != "" {
@@ -316,7 +324,7 @@ func (c *Container) initializeSocialAdapters() error {
 		c.Logger.Info("LinkedIn adapter initialized")
 	}
 
-	// Facebook adapter
+	// Facebook Adapter
 	facebookAppID := os.Getenv("FACEBOOK_APP_ID")
 	facebookAppSecret := os.Getenv("FACEBOOK_APP_SECRET")
 	if facebookAppID != "" && facebookAppSecret != "" {
@@ -330,40 +338,43 @@ func (c *Container) initializeSocialAdapters() error {
 	}
 
 	if len(c.SocialAdapters) > 0 {
-		c.Logger.Info(fmt.Sprintf("✅ Initialized %d social platform adapters", len(c.SocialAdapters)))
+		c.Logger.Info(fmt.Sprintf("✅ %d social adapters initialized", len(c.SocialAdapters)))
 	} else {
-		c.Logger.Warn("No social platform adapters initialized - check environment variables")
+		c.Logger.Warn("No social adapters initialized - OAuth credentials not provided")
 	}
 
 	return nil
 }
 
-// initializeUseCases sets up application use cases
+// ============================================================================
+// USE CASES (APPLICATION LAYER)
+// ============================================================================
+
 func (c *Container) initializeUseCases() error {
 	// ========================================================================
-	// USER & AUTH USE CASES
+	// AUTH USE CASES
 	// ========================================================================
-	// ✅ FIXED: Add userRepo as first parameter
-	c.CreateUserUC = userUC.NewCreateUserUseCase(
-		c.UserRepo, // ✅ ADDED
-		c.UserService,
-		c.TokenService,
-		c.EmailService,
-		c.Logger,
-	)
-
-	// ✅ FIXED: Add userRepo as first parameter
 	c.LoginUC = auth.NewLoginUseCase(
-		c.UserRepo, // ✅ ADDED
+		c.UserRepo,
 		c.UserService,
 		c.TokenService,
 		c.CacheService,
 		c.Logger,
 	)
 
-	// ✅ FIXED: Use UserRepo instead of UserService
+	// ========================================================================
+	// USER USE CASES
+	// ========================================================================
+	c.CreateUserUC = userUC.NewCreateUserUseCase(
+		c.UserRepo,
+		c.UserService,
+		c.TokenService,
+		c.EmailService,
+		c.Logger,
+	)
+
 	c.UpdateUserUC = userUC.NewUpdateUserUseCase(
-		c.UserRepo, // ✅ CHANGED from UserService
+		c.UserRepo,
 		c.Logger,
 	)
 
@@ -372,52 +383,46 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
-	// ✅ FIXED: Add tokenService parameter
 	c.DeleteUserUC = userUC.NewDeleteUserUseCase(
 		c.UserRepo,
-		c.TokenService, // ✅ ADDED
+		c.TokenService,
 		c.Logger,
 	)
 
 	// ========================================================================
 	// TEAM USE CASES
 	// ========================================================================
-	// ✅ FIXED: Add userRepo as third parameter
 	c.CreateTeamUC = teamUC.NewCreateTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo, // ✅ ADDED
+		c.UserRepo,
 		c.Logger,
 	)
 
-	// ✅ FIXED: Add userRepo as third parameter
 	c.GetTeamUC = teamUC.NewGetTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo, // ✅ ADDED
+		c.UserRepo,
 		c.Logger,
 	)
 
-	// ✅ FIXED: Add userRepo as third parameter
 	c.UpdateTeamUC = teamUC.NewUpdateTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo, // ✅ ADDED
+		c.UserRepo,
 		c.Logger,
 	)
 
-	// ✅ CORRECT: DeleteTeamUseCase doesn't need UserRepo
 	c.DeleteTeamUC = teamUC.NewDeleteTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	// ✅ FIXED: Add userRepo as third parameter
 	c.ListTeamsUC = teamUC.NewListTeamsUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo, // ✅ ADDED
+		c.UserRepo,
 		c.Logger,
 	)
 
@@ -447,7 +452,7 @@ func (c *Container) initializeUseCases() error {
 	// ========================================================================
 	c.CreateDraftUC = postUC.NewCreateDraftUseCase(
 		c.PostRepo,
-		c.TeamRepo, // ✅ ADDED
+		c.TeamRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
@@ -489,9 +494,9 @@ func (c *Container) initializeUseCases() error {
 	)
 
 	// ========================================================================
-	// SOCIAL USE CASES (if encryption service available)
+	// SOCIAL USE CASES (if available)
 	// ========================================================================
-	if c.EncryptionService != nil && len(c.SocialAdapters) > 0 {
+	if c.SocialRepo != nil && c.EncryptionService != nil && len(c.SocialAdapters) > 0 {
 		c.ConnectAccountUC = socialUC.NewConnectAccountUseCase(
 			c.SocialRepo,
 			c.MemberRepo,

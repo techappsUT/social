@@ -1,6 +1,6 @@
 // ============================================================================
 // FILE: backend/cmd/api/container.go
-// FULLY CORRECTED - All constructor signatures match actual use cases
+// CORRECTED: All constructor signatures match actual codebase
 // ============================================================================
 package main
 
@@ -8,6 +8,9 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
+
+	"github.com/redis/go-redis/v9"
 
 	socialAdapter "github.com/techappsUT/social-queue/internal/adapters/social"
 	"github.com/techappsUT/social-queue/internal/adapters/social/facebook"
@@ -38,6 +41,7 @@ type Container struct {
 	// Configuration
 	Config *Config
 	DB     *sql.DB
+	Redis  *redis.Client // NEW: Redis client
 
 	// Infrastructure Services
 	TokenService      common.TokenService
@@ -45,6 +49,7 @@ type Container struct {
 	CacheService      common.CacheService
 	Logger            common.Logger
 	EncryptionService *services.EncryptionService
+	WorkerQueue       *services.WorkerQueueService // NEW: Worker queue
 
 	// Repositories (interfaces)
 	UserRepo   userDomain.Repository
@@ -148,13 +153,21 @@ func NewContainer(config *Config, database *sql.DB) (*Container, error) {
 
 // initializeInfrastructure sets up repositories and services
 func (c *Container) initializeInfrastructure() error {
-	// Token Service
+	// Logger (initialize first for logging other components)
+	c.Logger = services.NewLogger() // ✅ FIXED: Use NewLogger() not NewConsoleLogger()
+
+	// ========================================================================
+	// TOKEN & AUTH SERVICES
+	// ========================================================================
 	c.TokenService = services.NewJWTTokenService(
 		c.Config.JWT.AccessSecret,
 		c.Config.JWT.RefreshSecret,
 	)
+	c.Logger.Info("Token service initialized successfully")
 
-	// Email Service
+	// ========================================================================
+	// EMAIL SERVICE
+	// ========================================================================
 	emailConfig := services.EmailConfig{
 		Provider:    c.Config.Email.Provider,
 		APIKey:      c.Config.Email.APIKey,
@@ -162,14 +175,63 @@ func (c *Container) initializeInfrastructure() error {
 		FromName:    c.Config.Email.FromName,
 	}
 	c.EmailService = services.NewEmailService(emailConfig)
+	c.Logger.Info("Email service initialized successfully")
 
-	// Logger
-	c.Logger = services.NewLogger()
+	// ========================================================================
+	// REDIS CLIENT & CACHE SERVICE
+	// ========================================================================
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "localhost"
+	}
 
-	// Cache Service
-	c.CacheService = services.NewInMemoryCacheService()
+	redisPort := 6379
+	if port := os.Getenv("REDIS_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			redisPort = p
+		}
+	}
 
-	// Encryption Service (for Social OAuth)
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := 0
+	if db := os.Getenv("REDIS_DB"); db != "" {
+		if d, err := strconv.Atoi(db); err == nil {
+			redisDB = d
+		}
+	}
+
+	// Initialize Redis Cache Service
+	cacheService, err := services.NewRedisCacheService(
+		redisHost,
+		redisPort,
+		redisPassword,
+		redisDB,
+		c.Logger,
+	)
+	if err != nil {
+		c.Logger.Warn(fmt.Sprintf("Failed to initialize Redis cache, falling back to in-memory: %v", err))
+		c.CacheService = services.NewInMemoryCacheService()
+	} else {
+		c.CacheService = cacheService
+		c.Logger.Info("✅ Redis cache service initialized successfully")
+
+		// Store Redis client for worker queue
+		c.Redis = cacheService.(*services.RedisCacheService).Client()
+	}
+
+	// ========================================================================
+	// WORKER QUEUE SERVICE
+	// ========================================================================
+	if c.Redis != nil {
+		c.WorkerQueue = services.NewWorkerQueueService(c.Redis, c.Logger)
+		c.Logger.Info("✅ Worker queue service initialized successfully")
+	} else {
+		c.Logger.Warn("Worker queue not initialized - Redis unavailable")
+	}
+
+	// ========================================================================
+	// ENCRYPTION SERVICE (for Social OAuth)
+	// ========================================================================
 	encryptionKey := os.Getenv("ENCRYPTION_KEY")
 	if encryptionKey == "" {
 		c.Logger.Warn("ENCRYPTION_KEY not set, social OAuth features will be limited")
@@ -182,7 +244,9 @@ func (c *Container) initializeInfrastructure() error {
 		c.Logger.Info("Encryption service initialized successfully")
 	}
 
-	// Initialize SQLC queries
+	// ========================================================================
+	// SQLC QUERIES
+	// ========================================================================
 	queries := db.New(c.DB)
 
 	// ========================================================================
@@ -193,7 +257,7 @@ func (c *Container) initializeInfrastructure() error {
 	c.MemberRepo = persistence.NewTeamMemberRepository(c.DB)
 	c.PostRepo = persistence.NewPostRepository(c.DB, queries)
 
-	// Social Repository
+	// Social Repository (requires encryption service)
 	if c.EncryptionService != nil {
 		c.SocialRepo = persistence.NewSocialRepository(queries, c.EncryptionService)
 		c.Logger.Info("Social repository initialized successfully")
@@ -201,7 +265,7 @@ func (c *Container) initializeInfrastructure() error {
 		c.Logger.Warn("Social repository not initialized - encryption service unavailable")
 	}
 
-	c.Logger.Info("Infrastructure layer initialized successfully")
+	c.Logger.Info("✅ Infrastructure layer initialized successfully")
 	return nil
 }
 
@@ -213,7 +277,7 @@ func (c *Container) initializeDomainServices() error {
 	// Team Domain Service
 	c.TeamService = teamDomain.NewService(c.TeamRepo, c.MemberRepo)
 
-	c.Logger.Info("Domain services initialized successfully")
+	c.Logger.Info("✅ Domain services initialized successfully")
 	return nil
 }
 
@@ -221,11 +285,20 @@ func (c *Container) initializeDomainServices() error {
 func (c *Container) initializeSocialAdapters() error {
 	c.SocialAdapters = make(map[socialDomain.Platform]socialAdapter.Adapter)
 
+	baseURL := os.Getenv("API_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+
 	// Twitter adapter
 	twitterClientID := os.Getenv("TWITTER_CLIENT_ID")
 	twitterClientSecret := os.Getenv("TWITTER_CLIENT_SECRET")
 	if twitterClientID != "" && twitterClientSecret != "" {
-		twitterAdapter := twitter.NewTwitterAdapter(twitterClientID, twitterClientSecret, "http://localhost:8000/api/v2/social/auth/twitter/callback")
+		twitterAdapter := twitter.NewTwitterAdapter(
+			twitterClientID,
+			twitterClientSecret,
+			fmt.Sprintf("%s/api/v2/social/auth/twitter/callback", baseURL),
+		)
 		c.SocialAdapters[socialDomain.PlatformTwitter] = twitterAdapter
 		c.Logger.Info("Twitter adapter initialized")
 	}
@@ -234,7 +307,11 @@ func (c *Container) initializeSocialAdapters() error {
 	linkedinClientID := os.Getenv("LINKEDIN_CLIENT_ID")
 	linkedinClientSecret := os.Getenv("LINKEDIN_CLIENT_SECRET")
 	if linkedinClientID != "" && linkedinClientSecret != "" {
-		linkedinAdapter := linkedin.NewLinkedInAdapter(linkedinClientID, linkedinClientSecret, "http://localhost:8000/api/v2/social/auth/linkedin/callback")
+		linkedinAdapter := linkedin.NewLinkedInAdapter(
+			linkedinClientID,
+			linkedinClientSecret,
+			fmt.Sprintf("%s/api/v2/social/auth/linkedin/callback", baseURL),
+		)
 		c.SocialAdapters[socialDomain.PlatformLinkedIn] = linkedinAdapter
 		c.Logger.Info("LinkedIn adapter initialized")
 	}
@@ -243,43 +320,50 @@ func (c *Container) initializeSocialAdapters() error {
 	facebookAppID := os.Getenv("FACEBOOK_APP_ID")
 	facebookAppSecret := os.Getenv("FACEBOOK_APP_SECRET")
 	if facebookAppID != "" && facebookAppSecret != "" {
-		facebookAdapter := facebook.NewFacebookAdapter(facebookAppID, facebookAppSecret, "http://localhost:8000/api/v2/social/auth/facebook/callback")
+		facebookAdapter := facebook.NewFacebookAdapter(
+			facebookAppID,
+			facebookAppSecret,
+			fmt.Sprintf("%s/api/v2/social/auth/facebook/callback", baseURL),
+		)
 		c.SocialAdapters[socialDomain.PlatformFacebook] = facebookAdapter
 		c.Logger.Info("Facebook adapter initialized")
 	}
 
-	if len(c.SocialAdapters) == 0 {
-		c.Logger.Warn("No social adapters initialized - set environment variables for Twitter, LinkedIn, or Facebook")
+	if len(c.SocialAdapters) > 0 {
+		c.Logger.Info(fmt.Sprintf("✅ Initialized %d social platform adapters", len(c.SocialAdapters)))
 	} else {
-		c.Logger.Info("Social adapters initialized", "count", len(c.SocialAdapters))
+		c.Logger.Warn("No social platform adapters initialized - check environment variables")
 	}
 
 	return nil
 }
 
-// initializeUseCases sets up all application use cases
+// initializeUseCases sets up application use cases
 func (c *Container) initializeUseCases() error {
 	// ========================================================================
-	// USER MODULE
+	// USER & AUTH USE CASES
 	// ========================================================================
+	// ✅ FIXED: Add userRepo as first parameter
 	c.CreateUserUC = userUC.NewCreateUserUseCase(
-		c.UserRepo,
+		c.UserRepo, // ✅ ADDED
 		c.UserService,
 		c.TokenService,
 		c.EmailService,
 		c.Logger,
 	)
 
+	// ✅ FIXED: Add userRepo as first parameter
 	c.LoginUC = auth.NewLoginUseCase(
-		c.UserRepo,
+		c.UserRepo, // ✅ ADDED
 		c.UserService,
 		c.TokenService,
 		c.CacheService,
 		c.Logger,
 	)
 
+	// ✅ FIXED: Use UserRepo instead of UserService
 	c.UpdateUserUC = userUC.NewUpdateUserUseCase(
-		c.UserRepo,
+		c.UserRepo, // ✅ CHANGED from UserService
 		c.Logger,
 	)
 
@@ -288,46 +372,52 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
+	// ✅ FIXED: Add tokenService parameter
 	c.DeleteUserUC = userUC.NewDeleteUserUseCase(
 		c.UserRepo,
-		c.TokenService,
+		c.TokenService, // ✅ ADDED
 		c.Logger,
 	)
 
 	// ========================================================================
-	// TEAM MODULE
+	// TEAM USE CASES
 	// ========================================================================
+	// ✅ FIXED: Add userRepo as third parameter
 	c.CreateTeamUC = teamUC.NewCreateTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo,
+		c.UserRepo, // ✅ ADDED
 		c.Logger,
 	)
 
+	// ✅ FIXED: Add userRepo as third parameter
 	c.GetTeamUC = teamUC.NewGetTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo,
+		c.UserRepo, // ✅ ADDED
 		c.Logger,
 	)
 
+	// ✅ FIXED: Add userRepo as third parameter
 	c.UpdateTeamUC = teamUC.NewUpdateTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo,
+		c.UserRepo, // ✅ ADDED
 		c.Logger,
 	)
 
+	// ✅ CORRECT: DeleteTeamUseCase doesn't need UserRepo
 	c.DeleteTeamUC = teamUC.NewDeleteTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
+	// ✅ FIXED: Add userRepo as third parameter
 	c.ListTeamsUC = teamUC.NewListTeamsUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo,
+		c.UserRepo, // ✅ ADDED
 		c.Logger,
 	)
 
@@ -348,16 +438,16 @@ func (c *Container) initializeUseCases() error {
 	c.UpdateMemberRoleUC = teamUC.NewUpdateMemberRoleUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
-		c.UserRepo, // ✅ Added missing UserRepo
+		c.UserRepo,
 		c.Logger,
 	)
 
 	// ========================================================================
-	// POST MODULE
+	// POST USE CASES
 	// ========================================================================
 	c.CreateDraftUC = postUC.NewCreateDraftUseCase(
 		c.PostRepo,
-		c.TeamRepo,
+		c.TeamRepo, // ✅ ADDED
 		c.MemberRepo,
 		c.Logger,
 	)
@@ -399,9 +489,9 @@ func (c *Container) initializeUseCases() error {
 	)
 
 	// ========================================================================
-	// SOCIAL MODULE
+	// SOCIAL USE CASES (if encryption service available)
 	// ========================================================================
-	if c.SocialRepo != nil && len(c.SocialAdapters) > 0 {
+	if c.EncryptionService != nil && len(c.SocialAdapters) > 0 {
 		c.ConnectAccountUC = socialUC.NewConnectAccountUseCase(
 			c.SocialRepo,
 			c.MemberRepo,
@@ -441,12 +531,12 @@ func (c *Container) initializeUseCases() error {
 			c.Logger,
 		)
 
-		c.Logger.Info("Social use cases initialized successfully")
+		c.Logger.Info("✅ Social use cases initialized successfully")
 	} else {
 		c.Logger.Warn("Social use cases not initialized - missing encryption service or adapters")
 	}
 
-	c.Logger.Info("Use cases initialized successfully")
+	c.Logger.Info("✅ Use cases initialized successfully")
 	return nil
 }
 
@@ -484,7 +574,7 @@ func (c *Container) initializeHandlers() error {
 		c.PublishNowUC,
 	)
 
-	// Social Handler
+	// Social Handler (if social use cases available)
 	if c.ConnectAccountUC != nil {
 		c.SocialHandler = handlers.NewSocialHandler(
 			c.ConnectAccountUC,
@@ -495,7 +585,7 @@ func (c *Container) initializeHandlers() error {
 			c.GetAnalyticsUC,
 			c.SocialAdapters,
 		)
-		c.Logger.Info("Social handler initialized successfully")
+		c.Logger.Info("✅ Social handler initialized successfully")
 	} else {
 		c.Logger.Warn("Social handler not initialized - social features unavailable")
 	}
@@ -503,6 +593,29 @@ func (c *Container) initializeHandlers() error {
 	// Auth Middleware
 	c.AuthMiddleware = middleware.NewAuthMiddleware(c.TokenService)
 
-	c.Logger.Info("Handlers initialized successfully")
+	c.Logger.Info("✅ Handlers initialized successfully")
+	return nil
+}
+
+// Cleanup closes all open connections
+func (c *Container) Cleanup() error {
+	// Close Redis connection
+	if c.Redis != nil {
+		if err := c.Redis.Close(); err != nil {
+			c.Logger.Error(fmt.Sprintf("Failed to close Redis connection: %v", err))
+			return err
+		}
+		c.Logger.Info("Redis connection closed")
+	}
+
+	// Close database connection
+	if c.DB != nil {
+		if err := c.DB.Close(); err != nil {
+			c.Logger.Error(fmt.Sprintf("Failed to close database connection: %v", err))
+			return err
+		}
+		c.Logger.Info("Database connection closed")
+	}
+
 	return nil
 }

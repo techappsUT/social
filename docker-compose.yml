@@ -1,8 +1,15 @@
-# path: docker-compose.yml
+# ============================================================================
+# FILE: docker-compose.yml
+# PURPOSE: Docker Compose configuration with worker service
+# ============================================================================
 
 version: '3.8'
 
 services:
+  # =========================================================================
+  # DATABASE SERVICES
+  # =========================================================================
+  
   postgres:
     image: postgres:15-alpine
     container_name: socialqueue-postgres
@@ -41,7 +48,10 @@ services:
       retries: 5
     command: redis-server --appendonly yes
 
-  # Backend API Service
+  # =========================================================================
+  # APPLICATION SERVICES
+  # =========================================================================
+
   backend:
     build:
       context: ./backend
@@ -80,11 +90,12 @@ services:
       SMTP_PASSWORD: ""
       EMAIL_FROM: noreply@socialqueue.local
       
-      # Social Media APIs (for future use)
+      # Social Media APIs
       TWITTER_CLIENT_ID: ""
       TWITTER_CLIENT_SECRET: ""
       FACEBOOK_APP_ID: ""
       FACEBOOK_APP_SECRET: ""
+      ENCRYPTION_KEY: "dev-encryption-key-32-chars-min"
       
       # Storage
       STORAGE_DRIVER: local
@@ -103,10 +114,55 @@ services:
       - backend-uploads:/app/uploads
     networks:
       - socialqueue-network
-    # Uncomment when Dockerfile.dev is ready
-    # command: make run
 
-  # Frontend Next.js Service
+  # =========================================================================
+  # WORKER SERVICE (BACKGROUND JOBS)
+  # =========================================================================
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: socialqueue-worker
+    restart: unless-stopped
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: socialqueue
+      DB_PASSWORD: socialqueue_dev_password
+      DB_NAME: socialqueue_dev
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # Social Media APIs
+      TWITTER_CLIENT_ID: ""
+      TWITTER_CLIENT_SECRET: ""
+      FACEBOOK_APP_ID: ""
+      FACEBOOK_APP_SECRET: ""
+      LINKEDIN_CLIENT_ID: ""
+      LINKEDIN_CLIENT_SECRET: ""
+      ENCRYPTION_KEY: "dev-encryption-key-32-chars-min"
+      
+      # Monitoring
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - socialqueue-network
+    # For development, mount source code
+    # volumes:
+    #   - ./backend:/app
+
+  # =========================================================================
+  # FRONTEND SERVICE
+  # =========================================================================
+
   frontend:
     build:
       context: ./frontend
@@ -127,38 +183,11 @@ services:
       - /app/.next
     networks:
       - socialqueue-network
-    # Uncomment when Dockerfile.dev is ready
-    # command: pnpm dev
 
-  # Background Worker (optional - for processing queued jobs)
-  # worker:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile.dev
-  #   container_name: socialqueue-worker
-  #   restart: unless-stopped
-  #   environment:
-  #     # Same as backend
-  #     DB_HOST: postgres
-  #     DB_PORT: 5432
-  #     DB_USER: socialqueue
-  #     DB_PASSWORD: socialqueue_dev_password
-  #     DB_NAME: socialqueue_dev
-  #     REDIS_HOST: redis
-  #     REDIS_PORT: 6379
-  #     LOG_LEVEL: debug
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./backend:/app
-  #   networks:
-  #     - socialqueue-network
-  #   command: make run-worker
+  # =========================================================================
+  # ADMIN TOOLS (OPTIONAL)
+  # =========================================================================
 
-  # Adminer - Database Management UI (optional)
   adminer:
     image: adminer:latest
     container_name: socialqueue-adminer
@@ -173,7 +202,6 @@ services:
     depends_on:
       - postgres
 
-  # Redis Commander - Redis Management UI (optional)
   redis-commander:
     image: rediscommander/redis-commander:latest
     container_name: socialqueue-redis-commander
@@ -186,6 +214,10 @@ services:
       - socialqueue-network
     depends_on:
       - redis
+
+# =============================================================================
+# NETWORKS & VOLUMES
+# =============================================================================
 
 networks:
   socialqueue-network:

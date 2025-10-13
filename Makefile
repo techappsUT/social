@@ -1,6 +1,9 @@
-# path: Makefile
+# ============================================================================
+# FILE: Makefile (Root)
+# UPDATED: Added worker management commands
+# ============================================================================
 
-.PHONY: help setup install build up down restart logs clean test migrate seed dev prod backend frontend db-shell db-reset
+.PHONY: help setup install build up down restart logs clean test migrate seed dev prod backend frontend db-shell db-reset worker
 
 # Colors for pretty output
 BLUE := \033[0;34m
@@ -85,6 +88,43 @@ logs-frontend: ## Tail frontend logs
 logs-postgres: ## Tail postgres logs
 	docker-compose logs -f postgres
 
+logs-redis: ## Tail redis logs
+	docker-compose logs -f redis
+
+##@ Worker Management
+
+worker-logs: ## Tail worker logs
+	@echo "$(BLUE)Tailing worker logs...$(NC)"
+	docker-compose logs -f worker
+
+worker-up: ## Start worker service
+	@echo "$(BLUE)Starting worker...$(NC)"
+	docker-compose up -d worker
+	@echo "$(GREEN)✓ Worker started!$(NC)"
+
+worker-down: ## Stop worker service
+	@echo "$(YELLOW)Stopping worker...$(NC)"
+	docker-compose stop worker
+	@echo "$(GREEN)✓ Worker stopped!$(NC)"
+
+worker-restart: ## Restart worker service
+	@echo "$(YELLOW)Restarting worker...$(NC)"
+	docker-compose restart worker
+	@echo "$(GREEN)✓ Worker restarted!$(NC)"
+
+worker-rebuild: ## Rebuild and restart worker
+	@echo "$(BLUE)Rebuilding worker...$(NC)"
+	docker-compose up -d --build worker
+	@echo "$(GREEN)✓ Worker rebuilt and restarted!$(NC)"
+
+worker-shell: ## Open shell in worker container
+	@echo "$(BLUE)Opening worker shell...$(NC)"
+	docker-compose exec worker sh
+
+worker-run-local: ## Run worker locally (not in Docker)
+	@echo "$(BLUE)Running worker locally...$(NC)"
+	cd backend && make run-worker
+
 ##@ Database Commands
 
 db-up: ## Start only database services (postgres + redis)
@@ -101,18 +141,24 @@ db-shell: ## Open PostgreSQL shell
 	@echo "$(BLUE)Opening database shell...$(NC)"
 	docker-compose exec postgres psql -U socialqueue -d socialqueue_dev
 
+db-migrate: ## Run database migrations
+	@echo "$(BLUE)Running migrations...$(NC)"
+	cd backend && make migrate-up
+	@echo "$(GREEN)✓ Migrations completed!$(NC)"
+
+db-migrate-status: ## Show migration status
+	@echo "$(BLUE)Checking migration status...$(NC)"
+	cd backend && make migrate-status
+
 db-reset: ## Reset database (WARNING: Deletes all data!)
 	@echo "$(RED)⚠️  WARNING: This will delete all data!$(NC)"
 	@printf "Are you sure? [y/N] "; \
 	read REPLY; \
-	case "$REPLY" in \
+	case "$$REPLY" in \
 		[Yy]*) \
-			echo "$(YELLOW)Resetting database...$(NC)"; \
-			docker-compose down -v; \
-			docker-compose up -d postgres redis; \
-			echo "$(YELLOW)Waiting for PostgreSQL to be ready...$(NC)"; \
-			sleep 5; \
-			make migrate; \
+			docker-compose exec postgres psql -U socialqueue -d postgres -c "DROP DATABASE IF EXISTS socialqueue_dev;"; \
+			docker-compose exec postgres psql -U socialqueue -d postgres -c "CREATE DATABASE socialqueue_dev;"; \
+			make db-migrate; \
 			echo "$(GREEN)✓ Database reset complete!$(NC)"; \
 			;; \
 		*) \
@@ -120,41 +166,37 @@ db-reset: ## Reset database (WARNING: Deletes all data!)
 			;; \
 	esac
 
-migrate: ## Run database migrations
-	@echo "$(BLUE)Running migrations...$(NC)"
-	cd backend && make migrate
-	@echo "$(GREEN)✓ Migrations complete!$(NC)"
+redis-cli: ## Open Redis CLI
+	@echo "$(BLUE)Opening Redis CLI...$(NC)"
+	docker-compose exec redis redis-cli
 
-migrate-create: ## Create a new migration (usage: make migrate-create name=create_posts_table)
-	@if [ -z "$(name)" ]; then \
-		echo "$(RED)Error: name is required$(NC)"; \
-		echo "Usage: make migrate-create name=create_posts_table"; \
-		exit 1; \
-	fi
-	cd backend && make migrate-create name=$(name)
-
-seed: ## Seed database with sample data
-	@echo "$(BLUE)Seeding database...$(NC)"
-	cd backend && make seed
-	@echo "$(GREEN)✓ Database seeded!$(NC)"
+redis-flush: ## Flush all Redis data (WARNING: Deletes all cache!)
+	@echo "$(RED)⚠️  WARNING: This will delete all Redis data!$(NC)"
+	@printf "Are you sure? [y/N] "; \
+	read REPLY; \
+	case "$$REPLY" in \
+		[Yy]*) \
+			docker-compose exec redis redis-cli FLUSHALL; \
+			echo "$(GREEN)✓ Redis flushed!$(NC)"; \
+			;; \
+		*) \
+			echo "$(YELLOW)Cancelled.$(NC)"; \
+			;; \
+	esac
 
 ##@ Development
 
-dev: ## Start development environment (databases + live reload)
-	@echo "$(BLUE)Starting development environment...$(NC)"
+dev: ## Start local development (backend + frontend outside Docker)
+	@echo "$(BLUE)Starting local development environment...$(NC)"
+	@echo ""
+	@echo "$(YELLOW)This will start databases in Docker, but run backend + frontend locally.$(NC)"
+	@echo ""
 	@make db-up
-	@echo "$(YELLOW)Waiting for databases to be ready...$(NC)"
-	@sleep 5
-	@make migrate
 	@echo ""
-	@echo "$(GREEN)✓ Development environment ready!$(NC)"
-	@echo ""
-	@echo "$(BLUE)Database Admin Tools:$(NC)"
-	@echo "  • Adminer: http://localhost:8081"
-	@echo "  • Redis Commander: http://localhost:8082"
+	@echo "$(GREEN)✓ Databases started!$(NC)"
 	@echo ""
 	@echo "$(YELLOW)To start backend:$(NC)  cd backend && make run"
-	@echo "$(YELLOW)To start frontend:$(NC) cd frontend && npm run dev"
+	@echo "$(YELLOW)To start frontend:$(NC) cd frontend && pnpm dev"
 	@echo ""
 
 dev-full: ## Start full development environment (all services in Docker)
@@ -163,10 +205,11 @@ dev-full: ## Start full development environment (all services in Docker)
 	@echo "$(GREEN)✓ Full development environment started!$(NC)"
 	@echo ""
 	@echo "$(BLUE)Services:$(NC)"
-	@echo "  • Frontend: http://localhost:3000"
-	@echo "  • Backend API: http://localhost:8080"
-	@echo "  • Adminer: http://localhost:8081"
+	@echo "  • Frontend:        http://localhost:3000"
+	@echo "  • Backend API:     http://localhost:8080"
+	@echo "  • Adminer:         http://localhost:8081"
 	@echo "  • Redis Commander: http://localhost:8082"
+	@echo "  • Worker:          Running in background"
 	@echo ""
 
 ##@ Backend Commands
@@ -179,6 +222,12 @@ backend-install: ## Install backend dependencies
 backend-run: ## Run backend server locally
 	cd backend && make run
 
+backend-build: ## Build backend binary
+	cd backend && make build
+
+backend-build-worker: ## Build worker binary
+	cd backend && make build-worker
+
 backend-test: ## Run backend tests
 	cd backend && make test
 
@@ -188,8 +237,8 @@ backend-test-coverage: ## Run backend tests with coverage
 backend-lint: ## Lint backend code
 	cd backend && make lint
 
-backend-build: ## Build backend binary
-	cd backend && make build
+backend-clean: ## Clean backend build artifacts
+	cd backend && make clean
 
 ##@ Frontend Commands
 
@@ -213,6 +262,9 @@ frontend-lint: ## Lint frontend code
 frontend-format: ## Format frontend code
 	cd frontend && pnpm format
 
+frontend-clean: ## Clean frontend build artifacts
+	cd frontend && rm -rf .next node_modules/.cache
+
 ##@ Testing
 
 test: ## Run all tests (backend + frontend)
@@ -231,6 +283,7 @@ test-integration: ## Run integration tests
 build: ## Build all services for production
 	@echo "$(BLUE)Building all services...$(NC)"
 	@make backend-build
+	@make backend-build-worker
 	@make frontend-build
 	@echo "$(GREEN)✓ Build complete!$(NC)"
 
@@ -247,17 +300,11 @@ clean: ## Clean all generated files and caches
 	@make frontend-clean
 	@echo "$(GREEN)✓ Cleanup complete!$(NC)"
 
-backend-clean: ## Clean backend build artifacts
-	cd backend && make clean
-
-frontend-clean: ## Clean frontend build artifacts
-	cd frontend && rm -rf .next node_modules/.cache .pnpm-store
-
 clean-volumes: ## Remove all Docker volumes (WARNING: Deletes data!)
 	@echo "$(RED)⚠️  WARNING: This will delete all Docker volumes!$(NC)"
 	@printf "Are you sure? [y/N] "; \
 	read REPLY; \
-	case "$REPLY" in \
+	case "$$REPLY" in \
 		[Yy]*) \
 			docker-compose down -v; \
 			echo "$(GREEN)✓ Volumes removed!$(NC)"; \
@@ -271,7 +318,7 @@ clean-all: ## Clean everything (files, volumes, images)
 	@echo "$(RED)⚠️  WARNING: This will remove all data, images, and containers!$(NC)"
 	@printf "Are you sure? [y/N] "; \
 	read REPLY; \
-	case "$REPLY" in \
+	case "$$REPLY" in \
 		[Yy]*) \
 			docker-compose down -v --rmi all; \
 			make clean; \
@@ -299,19 +346,41 @@ lint-all: ## Lint all code (backend + frontend)
 health-check: ## Check health of all services
 	@echo "$(BLUE)Checking service health...$(NC)"
 	@echo -n "Backend API: "
-	@curl -sf http://localhost:8080/health > /dev/null && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
-	@echo -n "Frontend: "
-	@curl -sf http://localhost:3000 > /dev/null && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
-	@echo -n "PostgreSQL: "
-	@docker-compose exec -T postgres pg_isready -U socialqueue > /dev/null && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
-	@echo -n "Redis: "
-	@docker-compose exec -T redis redis-cli ping > /dev/null && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
+	@curl -sf http://localhost:8080/health > /dev/null 2>&1 && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
+	@echo -n "Frontend:    "
+	@curl -sf http://localhost:3000 > /dev/null 2>&1 && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
+	@echo -n "PostgreSQL:  "
+	@docker-compose exec -T postgres pg_isready -U socialqueue > /dev/null 2>&1 && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
+	@echo -n "Redis:       "
+	@docker-compose exec -T redis redis-cli ping > /dev/null 2>&1 && echo "$(GREEN)✓ Healthy$(NC)" || echo "$(RED)✗ Down$(NC)"
+	@echo -n "Worker:      "
+	@docker-compose ps worker | grep -q "Up" && echo "$(GREEN)✓ Running$(NC)" || echo "$(RED)✗ Down$(NC)"
+
+queue-stats: ## Show worker queue statistics
+	@echo "$(BLUE)Worker Queue Statistics:$(NC)"
+	@echo ""
+	@echo "Publish Queue:"
+	@docker-compose exec -T redis redis-cli LLEN queue:publish_post 2>/dev/null || echo "  0 jobs"
+	@echo ""
+	@echo "Analytics Queue:"
+	@docker-compose exec -T redis redis-cli LLEN queue:fetch_analytics 2>/dev/null || echo "  0 jobs"
+	@echo ""
+	@echo "Processing:"
+	@docker-compose exec -T redis redis-cli LLEN processing:publish_post 2>/dev/null || echo "  0 jobs"
+	@echo ""
+	@echo "Dead Letter Queue (Failed):"
+	@docker-compose exec -T redis redis-cli LLEN dlq:publish_post 2>/dev/null || echo "  0 jobs"
 
 update-deps: ## Update all dependencies
 	@echo "$(BLUE)Updating dependencies...$(NC)"
 	cd backend && go get -u ./... && go mod tidy
 	cd frontend && pnpm update
 	@echo "$(GREEN)✓ Dependencies updated!$(NC)"
+
+install-tools: ## Install development tools
+	@echo "$(BLUE)Installing development tools...$(NC)"
+	cd backend && make install-tools
+	@echo "$(GREEN)✓ Development tools installed!$(NC)"
 
 ##@ Documentation
 
@@ -321,4 +390,17 @@ docs: ## Generate documentation
 
 api-docs: ## Open API documentation
 	@echo "Opening API docs..."
-	@open http://localhost:8080/swagger/index.html || xdg-open http://localhost:8080/swagger/index.html
+	@open http://localhost:8080/swagger/index.html 2>/dev/null || xdg-open http://localhost:8080/swagger/index.html 2>/dev/null || echo "$(YELLOW)Please open http://localhost:8080/swagger/index.html manually$(NC)"
+
+##@ Quick Commands
+
+fresh: clean build ## Clean and build everything
+	@echo "$(GREEN)✓ Fresh build complete!$(NC)"
+
+fresh-start: down clean-volumes up-build db-migrate ## Complete fresh start
+	@echo "$(GREEN)✓ Fresh environment started!$(NC)"
+
+quick-test: ## Quick test (backend only, no coverage)
+	@echo "$(BLUE)Running quick tests...$(NC)"
+	cd backend && go test ./... -short
+	@echo "$(GREEN)✓ Quick tests passed!$(NC)"

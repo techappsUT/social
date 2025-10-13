@@ -1,4 +1,7 @@
-# path: backend/Makefile
+# ============================================================================
+# FILE: backend/Makefile
+# UPDATED: Added worker commands
+# ============================================================================
 
 .PHONY: help run build test clean migrate dev
 
@@ -11,9 +14,11 @@ GOCMD=go
 GOBUILD=$(GOCMD) build
 GOTEST=$(GOCMD) test
 GOMOD=$(GOCMD) mod
+GORUN=$(GOCMD) run
 
 # Directories
 CMD_DIR=./cmd/api
+WORKER_DIR=./cmd/worker
 BUILD_DIR=./bin
 MIGRATION_DIR=./migrations
 
@@ -47,7 +52,15 @@ run: ## Run the API server
 		echo "$(YELLOW)Warning: .env file not found. Creating from .env.example...$(NC)"; \
 		cp .env.example .env; \
 	fi
-	$(GOCMD) run $(CMD_DIR)
+	$(GORUN) $(CMD_DIR)
+
+run-worker: ## Run the worker process
+	@echo "$(BLUE)Starting worker process...$(NC)"
+	@if [ ! -f .env ]; then \
+		echo "$(RED)Error: .env file not found. Please create it from .env.example$(NC)"; \
+		exit 1; \
+	fi
+	$(GORUN) $(WORKER_DIR)
 
 dev: ## Run with hot reload using Air
 	@echo "$(BLUE)Starting with hot reload...$(NC)"
@@ -66,8 +79,11 @@ build: ## Build the API binary
 build-worker: ## Build the worker binary
 	@echo "$(BLUE)Building worker binary...$(NC)"
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(BUILD_DIR)/$(WORKER_BINARY) -v ./cmd/worker
-	@echo "$(GREEN)✓ Binary built: $(BUILD_DIR)/$(WORKER_BINARY)$(NC)"
+	$(GOBUILD) -o $(BUILD_DIR)/$(WORKER_BINARY) -v $(WORKER_DIR)
+	@echo "$(GREEN)✓ Worker binary built: $(BUILD_DIR)/$(WORKER_BINARY)$(NC)"
+
+build-all: build build-worker ## Build both API and worker binaries
+	@echo "$(GREEN)✓ All binaries built successfully!$(NC)"
 
 ##@ Testing
 
@@ -82,9 +98,16 @@ test-coverage: ## Run tests with coverage report
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "$(GREEN)✓ Coverage report: coverage.html$(NC)"
 
+test-integration: ## Run integration tests
+	@echo "$(BLUE)Running integration tests...$(NC)"
+	$(GOTEST) -v -tags=integration ./tests/integration/...
+	@echo "$(GREEN)✓ Integration tests completed$(NC)"
+
 ##@ Database
 
-migrate: ## Run all pending migrations
+migrate: migrate-up ## Alias for migrate-up
+
+migrate-up: ## Run all pending migrations
 	@echo "$(BLUE)Running migrations...$(NC)"
 	@if [ ! -f .env ]; then \
 		echo "$(RED)Error: .env file not found. Please create it from .env.example$(NC)"; \
@@ -125,20 +148,34 @@ sqlc: ## Generate SQLC code
 	sqlc generate
 	@echo "$(GREEN)✓ SQLC code generated$(NC)"
 
-##@ Cleanup
+##@ Dependencies
 
-clean: ## Clean build artifacts
-	@echo "$(BLUE)Cleaning...$(NC)"
-	@rm -rf $(BUILD_DIR)
-	@rm -f coverage.out coverage.html
-	@echo "$(GREEN)✓ Cleaned$(NC)"
+deps: ## Download dependencies
+	@echo "$(BLUE)Downloading dependencies...$(NC)"
+	$(GOMOD) download
+	@echo "$(GREEN)✓ Dependencies downloaded$(NC)"
+
+deps-update: ## Update dependencies
+	@echo "$(BLUE)Updating dependencies...$(NC)"
+	$(GOCMD) get -u ./...
+	$(GOMOD) tidy
+	@echo "$(GREEN)✓ Dependencies updated$(NC)"
+
+deps-verify: ## Verify dependencies
+	@echo "$(BLUE)Verifying dependencies...$(NC)"
+	$(GOMOD) verify
+	@echo "$(GREEN)✓ Dependencies verified$(NC)"
+
+##@ Code Quality
 
 tidy: ## Tidy go modules
 	@echo "$(BLUE)Tidying modules...$(NC)"
 	$(GOMOD) tidy
 	@echo "$(GREEN)✓ Modules tidied$(NC)"
 
-fmt: ## Format code
+fmt: format ## Alias for format
+
+format: ## Format code
 	@echo "$(BLUE)Formatting code...$(NC)"
 	$(GOCMD) fmt ./...
 	@echo "$(GREEN)✓ Code formatted$(NC)"
@@ -148,13 +185,79 @@ lint: ## Run linter
 	golangci-lint run
 	@echo "$(GREEN)✓ Linting completed$(NC)"
 
+vet: ## Run go vet
+	@echo "$(BLUE)Running go vet...$(NC)"
+	$(GOCMD) vet ./...
+	@echo "$(GREEN)✓ Vet completed$(NC)"
+
+check: fmt lint vet test ## Format, lint, vet, and test
+	@echo "$(GREEN)✓ All checks passed!$(NC)"
+
+##@ Cleanup
+
+clean: ## Clean build artifacts
+	@echo "$(BLUE)Cleaning...$(NC)"
+	@rm -rf $(BUILD_DIR)
+	@rm -f coverage.out coverage.html
+	@echo "$(GREEN)✓ Cleaned$(NC)"
+
+clean-cache: ## Clean Go build cache
+	@echo "$(BLUE)Cleaning build cache...$(NC)"
+	$(GOCMD) clean -cache -testcache -modcache
+	@echo "$(GREEN)✓ Cache cleaned$(NC)"
+
+##@ Worker Management (Docker)
+
+worker-logs: ## Tail worker logs (requires Docker)
+	@echo "$(BLUE)Tailing worker logs...$(NC)"
+	docker-compose logs -f worker
+
+worker-restart: ## Restart worker service (requires Docker)
+	@echo "$(YELLOW)Restarting worker...$(NC)"
+	docker-compose restart worker
+	@echo "$(GREEN)✓ Worker restarted$(NC)"
+
+worker-stop: ## Stop worker service (requires Docker)
+	@echo "$(YELLOW)Stopping worker...$(NC)"
+	docker-compose stop worker
+	@echo "$(GREEN)✓ Worker stopped$(NC)"
+
+worker-start: ## Start worker service (requires Docker)
+	@echo "$(BLUE)Starting worker...$(NC)"
+	docker-compose start worker
+	@echo "$(GREEN)✓ Worker started$(NC)"
+
 ##@ Quick Actions
 
-fresh: clean build ## Clean and build
+fresh: clean build-all ## Clean and build everything
 	@echo "$(GREEN)✓ Fresh build complete!$(NC)"
 
-check: fmt lint test ## Format, lint, and test
-	@echo "$(GREEN)✓ All checks passed!$(NC)"
+install-tools: ## Install development tools
+	@echo "$(BLUE)Installing development tools...$(NC)"
+	@echo "Installing Air for hot reload..."
+	@go install github.com/air-verse/air@latest
+	@echo "Installing golangci-lint..."
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@echo "Installing migrate..."
+	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	@echo "Installing SQLC..."
+	@go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+	@echo "$(GREEN)✓ Development tools installed!$(NC)"
+
+##@ Info
+
+version: ## Show Go version
+	@$(GOCMD) version
+
+env: ## Show environment variables
+	@echo "$(BLUE)Environment:$(NC)"
+	@echo "  DB_HOST:     $(DB_HOST)"
+	@echo "  DB_PORT:     $(DB_PORT)"
+	@echo "  DB_NAME:     $(DB_NAME)"
+	@echo "  DB_USER:     $(DB_USER)"
+	@echo "  BUILD_DIR:   $(BUILD_DIR)"
+	@echo "  API_BINARY:  $(BINARY_NAME)"
+	@echo "  WORKER_BIN:  $(WORKER_BINARY)"
 
 # ##@ Quick Actions
 

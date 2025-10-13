@@ -1,6 +1,6 @@
 // ============================================================================
 // FILE: backend/cmd/api/container.go
-// COMPLETE FIXED VERSION
+// FULLY CORRECTED - All constructor signatures match actual use cases
 // ============================================================================
 package main
 
@@ -15,86 +15,95 @@ import (
 	"github.com/techappsUT/social-queue/internal/adapters/social/twitter"
 	"github.com/techappsUT/social-queue/internal/application/auth"
 	"github.com/techappsUT/social-queue/internal/application/common"
-	appPost "github.com/techappsUT/social-queue/internal/application/post"
-	appSocial "github.com/techappsUT/social-queue/internal/application/social"
-	"github.com/techappsUT/social-queue/internal/application/team"
-	"github.com/techappsUT/social-queue/internal/application/user"
+	postUC "github.com/techappsUT/social-queue/internal/application/post"
+	socialUC "github.com/techappsUT/social-queue/internal/application/social"
+	teamUC "github.com/techappsUT/social-queue/internal/application/team"
+	userUC "github.com/techappsUT/social-queue/internal/application/user"
 	"github.com/techappsUT/social-queue/internal/db"
+	postDomain "github.com/techappsUT/social-queue/internal/domain/post"
 	socialDomain "github.com/techappsUT/social-queue/internal/domain/social"
+	teamDomain "github.com/techappsUT/social-queue/internal/domain/team"
+	userDomain "github.com/techappsUT/social-queue/internal/domain/user"
 	"github.com/techappsUT/social-queue/internal/handlers"
 	"github.com/techappsUT/social-queue/internal/infrastructure/persistence"
 	"github.com/techappsUT/social-queue/internal/infrastructure/services"
 	"github.com/techappsUT/social-queue/internal/middleware"
 )
 
-// Container holds all application dependencies
+// ============================================================================
+// DEPENDENCY INJECTION CONTAINER
+// ============================================================================
+
 type Container struct {
+	// Configuration
 	Config *Config
 	DB     *sql.DB
 
-	// ========================================================================
-	// INFRASTRUCTURE LAYER
-	// ========================================================================
+	// Infrastructure Services
 	TokenService      common.TokenService
 	EmailService      common.EmailService
-	Logger            common.Logger
 	CacheService      common.CacheService
+	Logger            common.Logger
 	EncryptionService *services.EncryptionService
-	SocialAdapters    map[socialDomain.Platform]socialAdapter.Adapter
 
-	// ========================================================================
-	// REPOSITORIES
-	// ========================================================================
-	UserRepo   *persistence.UserRepository
-	TeamRepo   *persistence.TeamRepository
-	MemberRepo *persistence.TeamMemberRepository
-	PostRepo   *persistence.PostRepository
+	// Repositories (interfaces)
+	UserRepo   userDomain.Repository
+	TeamRepo   teamDomain.Repository
+	MemberRepo teamDomain.MemberRepository
+	PostRepo   postDomain.Repository
 	SocialRepo socialDomain.AccountRepository
+
+	// Domain Services
+	UserService *userDomain.Service
+	TeamService *teamDomain.Service
+
+	// Social Platform Adapters
+	SocialAdapters map[socialDomain.Platform]socialAdapter.Adapter
 
 	// ========================================================================
 	// USER MODULE USE CASES
 	// ========================================================================
-	CreateUserUC *user.CreateUserUseCase
+	CreateUserUC *userUC.CreateUserUseCase
 	LoginUC      *auth.LoginUseCase
-	UpdateUserUC *user.UpdateUserUseCase
-	GetUserUC    *user.GetUserUseCase
-	DeleteUserUC *user.DeleteUserUseCase
+	UpdateUserUC *userUC.UpdateUserUseCase
+	GetUserUC    *userUC.GetUserUseCase
+	DeleteUserUC *userUC.DeleteUserUseCase
 
 	// ========================================================================
 	// TEAM MODULE USE CASES
 	// ========================================================================
-	CreateTeamUC       *team.CreateTeamUseCase
-	GetTeamUC          *team.GetTeamUseCase
-	UpdateTeamUC       *team.UpdateTeamUseCase
-	DeleteTeamUC       *team.DeleteTeamUseCase
-	ListTeamsUC        *team.ListTeamsUseCase
-	InviteMemberUC     *team.InviteMemberUseCase
-	RemoveMemberUC     *team.RemoveMemberUseCase
-	UpdateMemberRoleUC *team.UpdateMemberRoleUseCase
+	CreateTeamUC       *teamUC.CreateTeamUseCase
+	GetTeamUC          *teamUC.GetTeamUseCase
+	UpdateTeamUC       *teamUC.UpdateTeamUseCase
+	DeleteTeamUC       *teamUC.DeleteTeamUseCase
+	ListTeamsUC        *teamUC.ListTeamsUseCase
+	InviteMemberUC     *teamUC.InviteMemberUseCase
+	RemoveMemberUC     *teamUC.RemoveMemberUseCase
+	UpdateMemberRoleUC *teamUC.UpdateMemberRoleUseCase
 
 	// ========================================================================
 	// POST MODULE USE CASES
 	// ========================================================================
-	CreateDraftUC  *appPost.CreateDraftUseCase
-	SchedulePostUC *appPost.SchedulePostUseCase
-	UpdatePostUC   *appPost.UpdatePostUseCase
-	DeletePostUC   *appPost.DeletePostUseCase
-	GetPostUC      *appPost.GetPostUseCase
-	ListPostsUC    *appPost.ListPostsUseCase
-	PublishNowUC   *appPost.PublishNowUseCase
+	CreateDraftUC  *postUC.CreateDraftUseCase
+	SchedulePostUC *postUC.SchedulePostUseCase
+	UpdatePostUC   *postUC.UpdatePostUseCase
+	DeletePostUC   *postUC.DeletePostUseCase
+	GetPostUC      *postUC.GetPostUseCase
+	ListPostsUC    *postUC.ListPostsUseCase
+	PublishNowUC   *postUC.PublishNowUseCase
 
 	// ========================================================================
 	// SOCIAL MODULE USE CASES
 	// ========================================================================
-	ConnectAccountUC    *appSocial.ConnectAccountUseCase
-	DisconnectAccountUC *appSocial.DisconnectAccountUseCase
-	RefreshTokensUC     *appSocial.RefreshTokensUseCase
-	ListAccountsUC      *appSocial.ListAccountsUseCase
-	PublishPostUC       *appSocial.PublishPostUseCase
-	GetAnalyticsUC      *appSocial.GetAnalyticsUseCase
+	ConnectAccountUC    *socialUC.ConnectAccountUseCase
+	DisconnectAccountUC *socialUC.DisconnectAccountUseCase
+	RefreshTokensUC     *socialUC.RefreshTokensUseCase
+	ListAccountsUC      *socialUC.ListAccountsUseCase
+	PublishPostUC       *socialUC.PublishPostUseCase
+	GetAnalyticsUC      *socialUC.GetAnalyticsUseCase
 
 	// ========================================================================
-	// HANDLERS
+	// HTTP HANDLERS
 	// ========================================================================
 	AuthHandler   *handlers.AuthHandlerV2
 	TeamHandler   *handlers.TeamHandler
@@ -116,6 +125,10 @@ func NewContainer(config *Config, database *sql.DB) (*Container, error) {
 
 	if err := c.initializeInfrastructure(); err != nil {
 		return nil, fmt.Errorf("infrastructure initialization failed: %w", err)
+	}
+
+	if err := c.initializeDomainServices(); err != nil {
+		return nil, fmt.Errorf("domain services initialization failed: %w", err)
 	}
 
 	if err := c.initializeSocialAdapters(); err != nil {
@@ -172,21 +185,35 @@ func (c *Container) initializeInfrastructure() error {
 	// Initialize SQLC queries
 	queries := db.New(c.DB)
 
-	// Repositories
-	c.UserRepo = persistence.NewUserRepository(queries)
-	c.TeamRepo = persistence.NewTeamRepository(queries)
-	c.MemberRepo = persistence.NewTeamMemberRepository(queries)
-	c.PostRepo = persistence.NewPostRepository(queries)
+	// ========================================================================
+	// REPOSITORIES
+	// ========================================================================
+	c.UserRepo = persistence.NewUserRepository(c.DB)
+	c.TeamRepo = persistence.NewTeamRepository(c.DB)
+	c.MemberRepo = persistence.NewTeamMemberRepository(c.DB)
+	c.PostRepo = persistence.NewPostRepository(c.DB, queries)
 
-	// FIX: Social repository needs DB connection and encryption service
+	// Social Repository
 	if c.EncryptionService != nil {
-		c.SocialRepo = persistence.NewSocialRepository(c.DB, c.EncryptionService)
+		c.SocialRepo = persistence.NewSocialRepository(queries, c.EncryptionService)
 		c.Logger.Info("Social repository initialized successfully")
 	} else {
 		c.Logger.Warn("Social repository not initialized - encryption service unavailable")
 	}
 
 	c.Logger.Info("Infrastructure layer initialized successfully")
+	return nil
+}
+
+// initializeDomainServices sets up domain services
+func (c *Container) initializeDomainServices() error {
+	// User Domain Service
+	c.UserService = userDomain.NewService(c.UserRepo)
+
+	// Team Domain Service
+	c.TeamService = teamDomain.NewService(c.TeamRepo, c.MemberRepo)
+
+	c.Logger.Info("Domain services initialized successfully")
 	return nil
 }
 
@@ -235,68 +262,76 @@ func (c *Container) initializeUseCases() error {
 	// ========================================================================
 	// USER MODULE
 	// ========================================================================
-	c.CreateUserUC = user.NewCreateUserUseCase(
+	c.CreateUserUC = userUC.NewCreateUserUseCase(
 		c.UserRepo,
+		c.UserService,
+		c.TokenService,
 		c.EmailService,
 		c.Logger,
 	)
 
 	c.LoginUC = auth.NewLoginUseCase(
 		c.UserRepo,
+		c.UserService,
 		c.TokenService,
+		c.CacheService,
 		c.Logger,
 	)
 
-	c.UpdateUserUC = user.NewUpdateUserUseCase(
+	c.UpdateUserUC = userUC.NewUpdateUserUseCase(
 		c.UserRepo,
 		c.Logger,
 	)
 
-	c.GetUserUC = user.NewGetUserUseCase(
+	c.GetUserUC = userUC.NewGetUserUseCase(
 		c.UserRepo,
 		c.Logger,
 	)
 
-	c.DeleteUserUC = user.NewDeleteUserUseCase(
+	c.DeleteUserUC = userUC.NewDeleteUserUseCase(
 		c.UserRepo,
+		c.TokenService,
 		c.Logger,
 	)
 
 	// ========================================================================
 	// TEAM MODULE
 	// ========================================================================
-	c.CreateTeamUC = team.NewCreateTeamUseCase(
+	c.CreateTeamUC = teamUC.NewCreateTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
 		c.UserRepo,
 		c.Logger,
 	)
 
-	c.GetTeamUC = team.NewGetTeamUseCase(
+	c.GetTeamUC = teamUC.NewGetTeamUseCase(
+		c.TeamRepo,
+		c.MemberRepo,
+		c.UserRepo,
+		c.Logger,
+	)
+
+	c.UpdateTeamUC = teamUC.NewUpdateTeamUseCase(
+		c.TeamRepo,
+		c.MemberRepo,
+		c.UserRepo,
+		c.Logger,
+	)
+
+	c.DeleteTeamUC = teamUC.NewDeleteTeamUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.UpdateTeamUC = team.NewUpdateTeamUseCase(
+	c.ListTeamsUC = teamUC.NewListTeamsUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
+		c.UserRepo,
 		c.Logger,
 	)
 
-	c.DeleteTeamUC = team.NewDeleteTeamUseCase(
-		c.TeamRepo,
-		c.MemberRepo,
-		c.Logger,
-	)
-
-	c.ListTeamsUC = team.NewListTeamsUseCase(
-		c.TeamRepo,
-		c.MemberRepo,
-		c.Logger,
-	)
-
-	c.InviteMemberUC = team.NewInviteMemberUseCase(
+	c.InviteMemberUC = teamUC.NewInviteMemberUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
 		c.UserRepo,
@@ -304,58 +339,60 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
-	c.RemoveMemberUC = team.NewRemoveMemberUseCase(
+	c.RemoveMemberUC = teamUC.NewRemoveMemberUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.UpdateMemberRoleUC = team.NewUpdateMemberRoleUseCase(
+	c.UpdateMemberRoleUC = teamUC.NewUpdateMemberRoleUseCase(
 		c.TeamRepo,
 		c.MemberRepo,
+		c.UserRepo, // ✅ Added missing UserRepo
 		c.Logger,
 	)
 
 	// ========================================================================
 	// POST MODULE
 	// ========================================================================
-	c.CreateDraftUC = appPost.NewCreateDraftUseCase(
+	c.CreateDraftUC = postUC.NewCreateDraftUseCase(
+		c.PostRepo,
+		c.TeamRepo,
+		c.MemberRepo,
+		c.Logger,
+	)
+
+	c.SchedulePostUC = postUC.NewSchedulePostUseCase(
 		c.PostRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.SchedulePostUC = appPost.NewSchedulePostUseCase(
+	c.UpdatePostUC = postUC.NewUpdatePostUseCase(
 		c.PostRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.UpdatePostUC = appPost.NewUpdatePostUseCase(
+	c.DeletePostUC = postUC.NewDeletePostUseCase(
 		c.PostRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.DeletePostUC = appPost.NewDeletePostUseCase(
+	c.GetPostUC = postUC.NewGetPostUseCase(
 		c.PostRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.GetPostUC = appPost.NewGetPostUseCase(
+	c.ListPostsUC = postUC.NewListPostsUseCase(
 		c.PostRepo,
 		c.MemberRepo,
 		c.Logger,
 	)
 
-	c.ListPostsUC = appPost.NewListPostsUseCase(
-		c.PostRepo,
-		c.MemberRepo,
-		c.Logger,
-	)
-
-	c.PublishNowUC = appPost.NewPublishNowUseCase(
+	c.PublishNowUC = postUC.NewPublishNowUseCase(
 		c.PostRepo,
 		c.MemberRepo,
 		c.Logger,
@@ -364,43 +401,41 @@ func (c *Container) initializeUseCases() error {
 	// ========================================================================
 	// SOCIAL MODULE
 	// ========================================================================
-	socialRepo := c.SocialRepo
-	if socialRepo != nil && len(c.SocialAdapters) > 0 {
-		c.ConnectAccountUC = appSocial.NewConnectAccountUseCase(
-			socialRepo,
+	if c.SocialRepo != nil && len(c.SocialAdapters) > 0 {
+		c.ConnectAccountUC = socialUC.NewConnectAccountUseCase(
+			c.SocialRepo,
 			c.MemberRepo,
 			c.SocialAdapters,
 			c.Logger,
 		)
 
-		c.DisconnectAccountUC = appSocial.NewDisconnectAccountUseCase(
-			socialRepo,
+		c.DisconnectAccountUC = socialUC.NewDisconnectAccountUseCase(
+			c.SocialRepo,
 			c.MemberRepo,
 			c.Logger,
 		)
 
-		c.RefreshTokensUC = appSocial.NewRefreshTokensUseCase(
-			socialRepo,
+		c.RefreshTokensUC = socialUC.NewRefreshTokensUseCase(
+			c.SocialRepo,
 			c.SocialAdapters,
 			c.Logger,
 		)
 
-		c.ListAccountsUC = appSocial.NewListAccountsUseCase(
-			socialRepo,
+		c.ListAccountsUC = socialUC.NewListAccountsUseCase(
+			c.SocialRepo,
 			c.MemberRepo,
 			c.Logger,
 		)
 
-		c.PublishPostUC = appSocial.NewPublishPostUseCase(
-			socialRepo,
+		c.PublishPostUC = socialUC.NewPublishPostUseCase(
+			c.SocialRepo,
 			c.MemberRepo,
 			c.SocialAdapters,
 			c.Logger,
 		)
 
-		// FIX: Remove memberRepo from GetAnalyticsUseCase constructor
-		c.GetAnalyticsUC = appSocial.NewGetAnalyticsUseCase(
-			socialRepo,
+		c.GetAnalyticsUC = socialUC.NewGetAnalyticsUseCase(
+			c.SocialRepo,
 			c.SocialAdapters,
 			c.CacheService,
 			c.Logger,
@@ -415,9 +450,9 @@ func (c *Container) initializeUseCases() error {
 	return nil
 }
 
-// initializeHandlers sets up all HTTP handlers
+// initializeHandlers sets up HTTP handlers
 func (c *Container) initializeHandlers() error {
-	// User/Auth Handler
+	// Auth Handler
 	c.AuthHandler = handlers.NewAuthHandlerV2(
 		c.CreateUserUC,
 		c.LoginUC,

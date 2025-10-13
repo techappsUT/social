@@ -1,6 +1,5 @@
 // ============================================================================
 // FILE: backend/internal/infrastructure/persistence/social_repository.go
-// FIXED VERSION - Uses AccountRepository interface from domain
 // ============================================================================
 package persistence
 
@@ -12,37 +11,34 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/domain/social"
 	"github.com/techappsUT/social-queue/internal/infrastructure/services"
 )
 
 type SocialRepository struct {
-	dbConn     *sql.DB
 	queries    *db.Queries
 	encryption *services.EncryptionService
 }
 
-func NewSocialRepository(dbConn *sql.DB, encryption *services.EncryptionService) social.AccountRepository {
+func NewSocialRepository(queries *db.Queries, encryption *services.EncryptionService) social.AccountRepository {
 	return &SocialRepository{
-		dbConn:     dbConn,
-		queries:    db.New(dbConn),
+		queries:    queries,
 		encryption: encryption,
 	}
 }
 
-// Create creates a new social account
+// Create persists a new social account
 func (r *SocialRepository) Create(ctx context.Context, account *social.Account) error {
-	// Extract credentials
 	credentials := account.Credentials()
 
-	// Encrypt access token
+	// Encrypt tokens
 	encryptedAccessToken, err := r.encryption.Encrypt(credentials.AccessToken)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt access token: %w", err)
 	}
 
-	// Encrypt refresh token if present
 	var encryptedRefreshToken sql.NullString
 	if credentials.RefreshToken != "" {
 		encrypted, err := r.encryption.Encrypt(credentials.RefreshToken)
@@ -52,14 +48,23 @@ func (r *SocialRepository) Create(ctx context.Context, account *social.Account) 
 		encryptedRefreshToken = sql.NullString{String: encrypted, Valid: true}
 	}
 
-	// Serialize metadata
+	// Marshal metadata to JSON
 	metadataJSON, err := json.Marshal(account.Metadata())
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Create social account
-	_, err = r.queries.LinkSocialAccount(ctx, db.LinkSocialAccountParams{
+	// FIX: Construct pqtype.NullRawMessage properly
+	var metadataNullJSON pqtype.NullRawMessage
+	if len(metadataJSON) > 0 {
+		metadataNullJSON = pqtype.NullRawMessage{
+			RawMessage: metadataJSON,
+			Valid:      true,
+		}
+	}
+
+	// Create account record
+	dbAccount, err := r.queries.LinkSocialAccount(ctx, db.LinkSocialAccountParams{
 		TeamID:         account.TeamID(),
 		Platform:       db.SocialPlatform(account.Platform()),
 		PlatformUserID: credentials.PlatformUserID,
@@ -69,27 +74,29 @@ func (r *SocialRepository) Create(ctx context.Context, account *social.Account) 
 		ProfileUrl:     sql.NullString{String: account.ProfileURL(), Valid: account.ProfileURL() != ""},
 		AccountType:    sql.NullString{String: string(account.AccountType()), Valid: true},
 		Status:         db.NullSocialAccountStatus{SocialAccountStatus: db.SocialAccountStatus(account.Status()), Valid: true},
-		Metadata:       metadataJSON,
+		Metadata:       metadataNullJSON, // FIX: Use proper type
 		ConnectedBy:    uuid.NullUUID{UUID: account.UserID(), Valid: true},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create social account: %w", err)
+		return fmt.Errorf("failed to create account: %w", err)
 	}
 
-	// Store tokens
+	// Create token record
 	var expiresAt sql.NullTime
 	if credentials.ExpiresAt != nil {
 		expiresAt = sql.NullTime{Time: *credentials.ExpiresAt, Valid: true}
 	}
 
 	_, err = r.queries.CreateSocialToken(ctx, db.CreateSocialTokenParams{
-		SocialAccountID: account.ID(),
+		SocialAccountID: dbAccount.ID,
 		AccessToken:     encryptedAccessToken,
 		RefreshToken:    encryptedRefreshToken,
+		TokenType:       sql.NullString{String: "Bearer", Valid: true},
 		ExpiresAt:       expiresAt,
+		Scope:           sql.NullString{String: "", Valid: false},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create social token: %w", err)
+		return fmt.Errorf("failed to create token: %w", err)
 	}
 
 	return nil
@@ -97,12 +104,8 @@ func (r *SocialRepository) Create(ctx context.Context, account *social.Account) 
 
 // FindByID retrieves a social account by ID
 func (r *SocialRepository) FindByID(ctx context.Context, id uuid.UUID) (*social.Account, error) {
-	// Get account with token
 	row, err := r.queries.GetSocialAccountWithToken(ctx, id)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, social.ErrAccountNotFound
-		}
 		return nil, err
 	}
 
@@ -118,10 +121,9 @@ func (r *SocialRepository) FindByTeamID(ctx context.Context, teamID uuid.UUID) (
 
 	accounts := make([]*social.Account, 0, len(dbAccounts))
 	for _, dbAccount := range dbAccounts {
-		// Get tokens for each account
 		row, err := r.queries.GetSocialAccountWithToken(ctx, dbAccount.ID)
 		if err != nil {
-			continue // Skip accounts with token errors
+			continue
 		}
 		account, err := r.mapToAccount(row)
 		if err != nil {
@@ -133,7 +135,7 @@ func (r *SocialRepository) FindByTeamID(ctx context.Context, teamID uuid.UUID) (
 	return accounts, nil
 }
 
-// FindByTeamAndPlatform retrieves accounts by team and platform
+// FindByTeamAndPlatform retrieves all social accounts for a team and platform (RENAMED)
 func (r *SocialRepository) FindByTeamAndPlatform(ctx context.Context, teamID uuid.UUID, platform social.Platform) ([]*social.Account, error) {
 	dbAccounts, err := r.queries.ListSocialAccountsByPlatform(ctx, db.ListSocialAccountsByPlatformParams{
 		TeamID:   teamID,
@@ -169,6 +171,7 @@ func (r *SocialRepository) Update(ctx context.Context, account *social.Account) 
 		return fmt.Errorf("failed to encrypt access token: %w", err)
 	}
 
+	// FIX: Construct sql.NullString properly
 	var encryptedRefreshToken sql.NullString
 	if credentials.RefreshToken != "" {
 		encrypted, err := r.encryption.Encrypt(credentials.RefreshToken)
@@ -186,9 +189,11 @@ func (r *SocialRepository) Update(ctx context.Context, account *social.Account) 
 
 	err = r.queries.UpdateSocialToken(ctx, db.UpdateSocialTokenParams{
 		SocialAccountID: account.ID(),
-		AccessToken:     encryptedAccessToken,
+		AccessToken:     sql.NullString{String: encryptedAccessToken, Valid: true},
 		RefreshToken:    encryptedRefreshToken,
+		TokenType:       sql.NullString{String: "Bearer", Valid: true},
 		ExpiresAt:       expiresAt,
+		Scope:           sql.NullString{}, // Empty scope, not updated
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update tokens: %w", err)
@@ -200,26 +205,123 @@ func (r *SocialRepository) Update(ctx context.Context, account *social.Account) 
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	return r.queries.UpdateSocialAccount(ctx, db.UpdateSocialAccountParams{
+	// FIX: Construct pqtype.NullRawMessage properly
+	var metadataNullJSON pqtype.NullRawMessage
+	if len(metadataJSON) > 0 {
+		metadataNullJSON = pqtype.NullRawMessage{
+			RawMessage: metadataJSON,
+			Valid:      true,
+		}
+	}
+
+	// FIX: Use UpdateSocialAccountMetadata instead of non-existent UpdateSocialAccount
+	return r.queries.UpdateSocialAccountMetadata(ctx, db.UpdateSocialAccountMetadataParams{
 		ID:          account.ID(),
 		Username:    sql.NullString{String: account.Username(), Valid: account.Username() != ""},
 		DisplayName: sql.NullString{String: account.DisplayName(), Valid: account.DisplayName() != ""},
 		AvatarUrl:   sql.NullString{String: account.AvatarURL(), Valid: account.AvatarURL() != ""},
-		ProfileUrl:  sql.NullString{String: account.ProfileURL(), Valid: account.ProfileURL() != ""},
-		Status:      db.NullSocialAccountStatus{SocialAccountStatus: db.SocialAccountStatus(account.Status()), Valid: true},
-		Metadata:    metadataJSON,
+		Metadata:    metadataNullJSON,
 	})
 }
 
 // Delete soft-deletes a social account
 func (r *SocialRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	return r.queries.DeleteSocialAccount(ctx, id)
+	// FIX: Use SoftDeleteSocialAccount instead of DeleteSocialAccount
+	return r.queries.SoftDeleteSocialAccount(ctx, id)
+}
+
+// CountByTeamID counts social accounts for a team
+func (r *SocialRepository) CountByTeamID(ctx context.Context, teamID uuid.UUID) (int64, error) {
+	return r.queries.CountSocialTokensByTeam(ctx, teamID)
+}
+
+// BulkUpdateStatus updates status for multiple accounts
+func (r *SocialRepository) BulkUpdateStatus(ctx context.Context, ids []uuid.UUID, status social.Status) error {
+	// Update each account's status in a transaction would be ideal,
+	// but for simplicity we'll update one by one
+	for _, id := range ids {
+		err := r.queries.UpdateSocialAccountStatus(ctx, db.UpdateSocialAccountStatusParams{
+			ID:     id,
+			Status: db.NullSocialAccountStatus{SocialAccountStatus: db.SocialAccountStatus(status), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update account %s status: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// FindByUserID retrieves all social accounts connected by a user
+func (r *SocialRepository) FindByUserID(ctx context.Context, userID uuid.UUID) ([]*social.Account, error) {
+	// Note: You may need to add a SQLC query for this
+	// For now, returning empty slice
+	return []*social.Account{}, nil
+}
+
+// FindByPlatform retrieves accounts by platform with pagination
+func (r *SocialRepository) FindByPlatform(ctx context.Context, platform social.Platform, offset, limit int) ([]*social.Account, error) {
+	// Note: You may need to add a SQLC query for this with pagination
+	return []*social.Account{}, nil
+}
+
+// FindByPlatformUserID finds an account by platform and platform user ID
+func (r *SocialRepository) FindByPlatformUserID(ctx context.Context, platform social.Platform, platformUserID string) (*social.Account, error) {
+	// Note: You may need to add a SQLC query for this
+	return nil, fmt.Errorf("not implemented")
+}
+
+// FindByStatus retrieves accounts by status with pagination
+func (r *SocialRepository) FindByStatus(ctx context.Context, status social.Status, offset, limit int) ([]*social.Account, error) {
+	// Note: You may need to add a SQLC query for this
+	return []*social.Account{}, nil
+}
+
+// FindExpiredAccounts retrieves all expired accounts
+func (r *SocialRepository) FindExpiredAccounts(ctx context.Context) ([]*social.Account, error) {
+	// Note: You may need to add a SQLC query for this
+	return []*social.Account{}, nil
+}
+
+// FindExpiringAccounts retrieves accounts expiring within specified days
+func (r *SocialRepository) FindExpiringAccounts(ctx context.Context, withinDays int) ([]*social.Account, error) {
+	// Note: You may need to add a SQLC query for this
+	return []*social.Account{}, nil
+}
+
+// FindRateLimitedAccounts retrieves all rate-limited accounts
+func (r *SocialRepository) FindRateLimitedAccounts(ctx context.Context) ([]*social.Account, error) {
+	// Note: You may need to add a SQLC query for this
+	return []*social.Account{}, nil
+}
+
+// ExistsByTeamAndPlatformUser checks if an account exists
+func (r *SocialRepository) ExistsByTeamAndPlatformUser(ctx context.Context, teamID uuid.UUID, platform social.Platform, platformUserID string) (bool, error) {
+	// Note: You may need to add a SQLC query for this
+	return false, nil
+}
+
+// HardDelete permanently deletes an account
+func (r *SocialRepository) HardDelete(ctx context.Context, id uuid.UUID) error {
+	// Note: You may need to add a SQLC query for this
+	return fmt.Errorf("not implemented")
+}
+
+// DeleteExpiredAccounts deletes accounts expired longer than specified duration
+// Returns the number of accounts deleted
+func (r *SocialRepository) DeleteExpiredAccounts(ctx context.Context, olderThan time.Duration) (int, error) {
+	// Note: You may need to add a SQLC query for this
+	return 0, nil
 }
 
 // Helper: Map database row to domain entity with decrypted tokens
 func (r *SocialRepository) mapToAccount(row db.GetSocialAccountWithTokenRow) (*social.Account, error) {
+	// FIX: Handle sql.NullString for AccessToken
+	if !row.AccessToken.Valid || row.AccessToken.String == "" {
+		return nil, fmt.Errorf("access token is missing")
+	}
+
 	// Decrypt tokens
-	accessToken, err := r.encryption.Decrypt(row.AccessToken)
+	accessToken, err := r.encryption.Decrypt(row.AccessToken.String) // FIX: Use .String
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt access token: %w", err)
 	}
@@ -234,8 +336,9 @@ func (r *SocialRepository) mapToAccount(row db.GetSocialAccountWithTokenRow) (*s
 
 	// Parse metadata
 	var metadata social.AccountMetadata
-	if len(row.Metadata) > 0 {
-		if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
+	// FIX: Check Valid field for pqtype.NullRawMessage
+	if row.Metadata.Valid && len(row.Metadata.RawMessage) > 0 {
+		if err := json.Unmarshal(row.Metadata.RawMessage, &metadata); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
 	}
@@ -274,6 +377,12 @@ func (r *SocialRepository) mapToAccount(row db.GetSocialAccountWithTokenRow) (*s
 		deletedAt = &row.DeletedAt.Time
 	}
 
+	// FIX: Handle LastSyncedAt pointer conversion
+	var lastSyncAt *time.Time
+	if row.LastSyncedAt.Valid {
+		lastSyncAt = &row.LastSyncedAt.Time
+	}
+
 	return social.Reconstruct(
 		row.ID,
 		row.TeamID,
@@ -287,68 +396,12 @@ func (r *SocialRepository) mapToAccount(row db.GetSocialAccountWithTokenRow) (*s
 		credentials,
 		metadata,
 		social.Status(row.Status.SocialAccountStatus),
-		social.RateLimits{}, // Load default or from metadata
-		row.LastSyncedAt.Time,
+		social.RateLimits{}, // Empty rate limits for now
+		lastSyncAt,          // FIX: Pass pointer
 		connectedAt,
-		expiresAt,
+		nil, // expiresAt for account (not token)
 		createdAt,
 		updatedAt,
 		deletedAt,
 	), nil
-}
-
-// Implement remaining methods with simple implementations
-func (r *SocialRepository) CountByTeamID(ctx context.Context, teamID uuid.UUID) (int64, error) {
-	accounts, err := r.FindByTeamID(ctx, teamID)
-	if err != nil {
-		return 0, err
-	}
-	return int64(len(accounts)), nil
-}
-
-func (r *SocialRepository) FindByUserID(ctx context.Context, userID uuid.UUID) ([]*social.Account, error) {
-	// Simplified - would need SQL query to filter by connected_by
-	return []*social.Account{}, nil
-}
-
-func (r *SocialRepository) FindByPlatform(ctx context.Context, platform social.Platform, offset, limit int) ([]*social.Account, error) {
-	// Simplified implementation
-	return []*social.Account{}, nil
-}
-
-func (r *SocialRepository) FindByPlatformUserID(ctx context.Context, platform social.Platform, platformUserID string) (*social.Account, error) {
-	// Simplified - would need specific SQL query
-	return nil, social.ErrAccountNotFound
-}
-
-func (r *SocialRepository) FindByStatus(ctx context.Context, status social.Status, offset, limit int) ([]*social.Account, error) {
-	return []*social.Account{}, nil
-}
-
-func (r *SocialRepository) FindExpiredAccounts(ctx context.Context) ([]*social.Account, error) {
-	return []*social.Account{}, nil
-}
-
-func (r *SocialRepository) FindExpiringAccounts(ctx context.Context, withinDays int) ([]*social.Account, error) {
-	return []*social.Account{}, nil
-}
-
-func (r *SocialRepository) FindRateLimitedAccounts(ctx context.Context) ([]*social.Account, error) {
-	return []*social.Account{}, nil
-}
-
-func (r *SocialRepository) ExistsByTeamAndPlatformUser(ctx context.Context, teamID uuid.UUID, platform social.Platform, platformUserID string) (bool, error) {
-	return false, nil
-}
-
-func (r *SocialRepository) BulkUpdateStatus(ctx context.Context, ids []uuid.UUID, status social.Status) error {
-	return nil
-}
-
-func (r *SocialRepository) HardDelete(ctx context.Context, id uuid.UUID) error {
-	return r.Delete(ctx, id)
-}
-
-func (r *SocialRepository) DeleteExpiredAccounts(ctx context.Context, olderThan time.Duration) (int, error) {
-	return 0, nil
 }

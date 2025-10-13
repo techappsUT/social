@@ -35,17 +35,23 @@ type AnalyticsDTO struct {
 
 // MapAccountToDTO converts domain entity to DTO
 func MapAccountToDTO(account *socialDomain.Account) *SocialAccountDTO {
+	// Get credentials to access PlatformUserID
+	credentials := account.Credentials()
+
+	// Determine if account is active
+	isActive := account.Status() == socialDomain.StatusActive
+
 	return &SocialAccountDTO{
 		ID:             account.ID(),
 		TeamID:         account.TeamID(),
 		Platform:       string(account.Platform()),
-		PlatformUserID: account.PlatformUserID(),
+		PlatformUserID: credentials.PlatformUserID, // FIX: Access through credentials
 		Username:       account.Username(),
 		DisplayName:    account.DisplayName(),
 		AvatarURL:      account.AvatarURL(),
-		IsActive:       account.IsActive(),
+		IsActive:       isActive,
 		ExpiresAt:      account.ExpiresAt(),
-		ConnectedAt:    account.CreatedAt(),
+		ConnectedAt:    account.ConnectedAt(),
 		UpdatedAt:      account.UpdatedAt(),
 	}
 }

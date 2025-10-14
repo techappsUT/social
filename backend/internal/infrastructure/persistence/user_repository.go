@@ -355,6 +355,17 @@ func (r *UserRepository) CountByStatus(ctx context.Context, status user.Status) 
 // HELPER METHODS
 // ============================================================================
 
+// ExistsByID checks if a user exists with the given ID
+func (r *UserRepository) ExistsByID(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check user existence: %w", err)
+	}
+	return exists, nil
+}
+
 func (r *UserRepository) scanUsers(rows *sql.Rows) ([]*user.User, error) {
 	var users []*user.User
 	for rows.Next() {
@@ -385,6 +396,29 @@ func (r *UserRepository) scanUsers(rows *sql.Rows) ([]*user.User, error) {
 	return users, nil
 }
 
+// MarkEmailVerified marks a user's email as verified
+func (r *UserRepository) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
+	query := `
+		UPDATE users 
+		SET email_verified = TRUE, updated_at = NOW() 
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to mark email as verified: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return user.ErrUserNotFound
+	}
+
+	return nil
+}
 func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 	// These are plain strings (NOT NULL in DB)
 	username := dbUser.Username

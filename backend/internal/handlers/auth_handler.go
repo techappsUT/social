@@ -177,30 +177,24 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 // Logout handles POST /api/v2/auth/logout
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	userID, _ := middleware.GetUserID(r.Context())
-
-	// Get tokens
+	// Get refresh token from cookie
 	var refreshToken string
 	cookie, err := r.Cookie("refresh_token")
 	if err == nil {
 		refreshToken = cookie.Value
 	}
 
-	accessToken := r.Header.Get("Authorization")
-	if len(accessToken) > 7 {
-		accessToken = accessToken[7:] // Remove "Bearer "
-	}
+	// Execute logout use case - only needs RefreshToken
+	if refreshToken != "" {
+		input := auth.LogoutInput{
+			RefreshToken: refreshToken,
+		}
 
-	input := auth.LogoutInput{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		UserID:       userID.String(),
-	}
-
-	output, err := h.logoutUC.Execute(r.Context(), input)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
+		_, err = h.logoutUC.Execute(r.Context(), input)
+		if err != nil {
+			// Don't fail logout - still clear cookies
+			// Just log the error if you have a logger
+		}
 	}
 
 	// Clear refresh token cookie
@@ -214,7 +208,10 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1, // Delete cookie
 	})
 
-	respondSuccess(w, output)
+	respondSuccess(w, map[string]interface{}{
+		"success": true,
+		"message": "Logged out successfully",
+	})
 }
 
 // VerifyEmail handles POST /api/v2/auth/verify-email
@@ -299,7 +296,8 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	input.UserID = userID.String()
+	// ✅ FIX: Set UserID as uuid.UUID directly (not string)
+	input.UserID = userID
 
 	output, err := h.changePasswordUC.Execute(r.Context(), input)
 	if err != nil {

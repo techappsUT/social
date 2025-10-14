@@ -1,4 +1,3 @@
-// -------------------------------------------------------------------
 // path: backend/internal/infrastructure/services/token_service.go
 package services
 
@@ -77,6 +76,36 @@ func (s *JWTTokenService) ValidateAccessToken(tokenString string) (*common.Token
 			UserID: claims["user_id"].(string),
 			Email:  claims["email"].(string),
 			Role:   claims["role"].(string),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("invalid token")
+}
+
+// ✅ ADD THIS METHOD
+// ValidateRefreshToken validates a refresh token and returns claims
+func (s *JWTTokenService) ValidateRefreshToken(tokenString string) (*common.TokenClaims, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(s.refreshSecret), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		// Check token type
+		if tokenType, ok := claims["type"].(string); !ok || tokenType != "refresh" {
+			return nil, fmt.Errorf("invalid token type")
+		}
+
+		return &common.TokenClaims{
+			UserID: claims["user_id"].(string),
+			Email:  "", // Refresh tokens don't include email
+			Role:   "", // Refresh tokens don't include role
 		}, nil
 	}
 

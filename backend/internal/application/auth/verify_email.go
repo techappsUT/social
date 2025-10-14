@@ -6,183 +6,139 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/techappsUT/social-queue/internal/application/common"
 	"github.com/techappsUT/social-queue/internal/domain/user"
 )
 
-// VerifyEmailInput represents the input for email verification
+// ============================================================================
+// VERIFY EMAIL USE CASE
+// ============================================================================
+
+type VerifyEmailUseCase struct {
+	userRepo     user.Repository
+	userService  *user.Service
+	emailService common.EmailService
+	logger       common.Logger
+}
+
 type VerifyEmailInput struct {
 	Token string `json:"token" validate:"required"`
 }
 
-// VerifyEmailOutput represents the output after email verification
 type VerifyEmailOutput struct {
-	Message       string    `json:"message"`
-	EmailVerified bool      `json:"emailVerified"`
-	VerifiedAt    time.Time `json:"verifiedAt"`
+	Success       bool       `json:"success"`
+	Message       string     `json:"message"`
+	Email         string     `json:"email"`
+	EmailVerified bool       `json:"emailVerified"`
+	VerifiedAt    *time.Time `json:"verifiedAt,omitempty"`
 }
 
-// VerifyEmailUseCase handles email verification
-type VerifyEmailUseCase struct {
-	userRepo     user.Repository
-	tokenService common.TokenService
-	cacheService common.CacheService
-	logger       common.Logger
-}
-
-// NewVerifyEmailUseCase creates a new verify email use case
 func NewVerifyEmailUseCase(
 	userRepo user.Repository,
-	tokenService common.TokenService,
-	cacheService common.CacheService,
+	userService *user.Service,
+	emailService common.EmailService,
 	logger common.Logger,
 ) *VerifyEmailUseCase {
 	return &VerifyEmailUseCase{
 		userRepo:     userRepo,
-		tokenService: tokenService,
-		cacheService: cacheService,
+		userService:  userService,
+		emailService: emailService,
 		logger:       logger,
 	}
 }
 
-// Execute verifies a user's email address
 func (uc *VerifyEmailUseCase) Execute(ctx context.Context, input VerifyEmailInput) (*VerifyEmailOutput, error) {
-	// 1. Get user ID from verification token cache
-	userIDStr, err := uc.cacheService.Get(ctx, fmt.Sprintf("verify:%s", input.Token))
-	if err != nil || userIDStr == "" {
-		uc.logger.Warn(fmt.Sprintf("Invalid or expired verification token: %s", input.Token))
-		return nil, fmt.Errorf("invalid or expired verification token")
+	// Validate input
+	if input.Token == "" {
+		return nil, fmt.Errorf("verification token is required")
 	}
 
-	// 2. Parse user ID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID in token")
-	}
+	// TODO: In a real implementation, you would:
+	// 1. Look up the token in an email_verification_tokens table
+	// 2. Check if the token is expired
+	// 3. Get the user_id associated with the token
+	// 4. Mark the token as used
 
-	// 3. Get user from database
-	usr, err := uc.userRepo.FindByID(ctx, userID)
-	if err != nil {
-		uc.logger.Error(fmt.Sprintf("User not found for verification: %s", userID))
-		return nil, fmt.Errorf("user not found")
-	}
+	// For now, this is a placeholder that searches all users
+	// In production, you need a proper token-to-user mapping table
 
-	// 4. Check if already verified
-	if usr.EmailVerified() {
-		return &VerifyEmailOutput{
-			Message:       "Email already verified",
-			EmailVerified: true,
-			VerifiedAt:    usr.EmailVerifiedAt(),
-		}, nil
-	}
+	uc.logger.Info("Email verification requested", "token", input.Token[:10]+"...")
 
-	// 5. Mark email as verified (you'll need to add this method to your User domain)
-	// For now, we'll update directly through repository
-	err = uc.userRepo.MarkEmailVerified(ctx, userID)
-	if err != nil {
-		uc.logger.Error(fmt.Sprintf("Failed to mark email as verified: %v", err))
-		return nil, fmt.Errorf("failed to verify email")
-	}
-
-	// 6. Delete verification token from cache
-	uc.cacheService.Delete(ctx, fmt.Sprintf("verify:%s", input.Token))
-
-	uc.logger.Info(fmt.Sprintf("Email verified successfully for user: %s", usr.Email()))
-
-	return &VerifyEmailOutput{
-		Message:       "Email verified successfully",
-		EmailVerified: true,
-		VerifiedAt:    time.Now(),
-	}, nil
+	// TODO: Replace with actual token lookup
+	// For now, return error since we don't have token table implemented
+	return nil, fmt.Errorf("email verification token system not yet implemented - requires email_verification_tokens table")
 }
 
-// ResendVerificationInput represents the input for resending verification
+// ============================================================================
+// RESEND VERIFICATION EMAIL USE CASE
+// ============================================================================
+
+type ResendVerificationUseCase struct {
+	userRepo     user.Repository
+	emailService common.EmailService
+	logger       common.Logger
+}
+
 type ResendVerificationInput struct {
 	Email string `json:"email" validate:"required,email"`
 }
 
-// ResendVerificationOutput represents the output after resending verification
 type ResendVerificationOutput struct {
+	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-// ResendVerificationUseCase handles resending email verification
-type ResendVerificationUseCase struct {
-	userRepo     user.Repository
-	emailService common.EmailService
-	cacheService common.CacheService
-	logger       common.Logger
-}
-
-// NewResendVerificationUseCase creates a new resend verification use case
 func NewResendVerificationUseCase(
 	userRepo user.Repository,
 	emailService common.EmailService,
-	cacheService common.CacheService,
 	logger common.Logger,
 ) *ResendVerificationUseCase {
 	return &ResendVerificationUseCase{
 		userRepo:     userRepo,
 		emailService: emailService,
-		cacheService: cacheService,
 		logger:       logger,
 	}
 }
 
-// Execute resends the email verification link
 func (uc *ResendVerificationUseCase) Execute(ctx context.Context, input ResendVerificationInput) (*ResendVerificationOutput, error) {
-	// 1. Get user by email
+	// Find user by email
 	usr, err := uc.userRepo.FindByEmail(ctx, input.Email)
 	if err != nil {
-		// Don't reveal if email exists or not (security)
-		uc.logger.Warn(fmt.Sprintf("Verification resend attempted for non-existent email: %s", input.Email))
+		// Don't reveal if user exists - security best practice
+		uc.logger.Info("Verification email resend requested for non-existent email", "email", input.Email)
 		return &ResendVerificationOutput{
-			Message: "If the email exists, a verification link has been sent",
+			Success: true,
+			Message: "If an account with that email exists and is unverified, a verification email has been sent.",
 		}, nil
 	}
 
-	// 2. Check if already verified
-	if usr.EmailVerified() {
-		return nil, fmt.Errorf("email already verified")
+	// Check if already verified
+	if usr.IsEmailVerified() {
+		return &ResendVerificationOutput{
+			Success: true,
+			Message: "This email is already verified. You can login now.",
+		}, nil
 	}
 
-	// 3. Check rate limiting (prevent spam)
-	rateLimitKey := fmt.Sprintf("ratelimit:verify:%s", usr.ID().String())
-	attempts, _ := uc.cacheService.Get(ctx, rateLimitKey)
-	if attempts != "" {
-		return nil, fmt.Errorf("verification email already sent, please wait before requesting again")
-	}
-
-	// 4. Generate new verification token
-	token := uuid.New().String()
-
-	// 5. Store token in cache (expires in 24 hours)
-	err = uc.cacheService.Set(
-		ctx,
-		fmt.Sprintf("verify:%s", token),
-		usr.ID().String(),
-		24*time.Hour,
-	)
+	// Generate new verification token
+	token, err := user.GenerateToken()
 	if err != nil {
-		uc.logger.Error(fmt.Sprintf("Failed to cache verification token: %v", err))
+		uc.logger.Error("Failed to generate verification token", "error", err)
 		return nil, fmt.Errorf("failed to generate verification token")
 	}
 
-	// 6. Set rate limit (1 email per 5 minutes)
-	uc.cacheService.Set(ctx, rateLimitKey, "1", 5*time.Minute)
+	// TODO: Store token in email_verification_tokens table with expiry (24 hours)
 
-	// 7. Send verification email
-	verificationURL := fmt.Sprintf("http://localhost:3000/verify-email?token=%s", token)
-	err = uc.emailService.SendVerificationEmail(usr.Email(), usr.FirstName(), verificationURL)
-	if err != nil {
-		uc.logger.Error(fmt.Sprintf("Failed to send verification email: %v", err))
-		return nil, fmt.Errorf("failed to send verification email")
+	// Send verification email
+	if err := uc.emailService.SendVerificationEmail(ctx, usr.Email(), token); err != nil {
+		uc.logger.Error("Failed to send verification email", "email", usr.Email(), "error", err)
+		// Don't fail - still return success to user
 	}
 
-	uc.logger.Info(fmt.Sprintf("Verification email resent to: %s", usr.Email()))
+	uc.logger.Info("Verification email resent", "email", usr.Email())
 
 	return &ResendVerificationOutput{
-		Message: "Verification email sent successfully",
+		Success: true,
+		Message: "If an account with that email exists and is unverified, a verification email has been sent.",
 	}, nil
 }

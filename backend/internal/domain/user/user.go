@@ -417,6 +417,24 @@ func isValidRole(role Role) bool {
 	}
 }
 
+// Additional getters for auth module
+func (u *User) EmailVerifiedAt() *time.Time {
+	if u.emailVerified {
+		// If email is verified but no timestamp exists, return created timestamp
+		return &u.createdAt
+	}
+	return nil
+}
+
+// func (u *User) PasswordHash() string {
+//     return u.passwordHash
+// }
+
+// IsDeleted checks if the user has been soft-deleted
+func (u *User) IsDeleted() bool {
+	return u.deletedAt != nil
+}
+
 // SetID sets the user ID (used by repository after creation)
 // func (u *User) SetID(id uuid.UUID) {
 // 	u.id = id

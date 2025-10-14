@@ -15,6 +15,7 @@ type TokenService interface {
 	GenerateAccessToken(userID, email, role string) (string, error)
 	GenerateRefreshToken(userID string) (string, error)
 	ValidateAccessToken(token string) (*TokenClaims, error)
+	ValidateRefreshToken(token string) (*TokenClaims, error) // ✅ ADD THIS
 	RevokeRefreshToken(ctx context.Context, token string) error
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Service provides domain-level business logic for users
@@ -429,4 +430,18 @@ type AdminUserSpecification struct{}
 
 func (s AdminUserSpecification) IsSatisfiedBy(user *User) bool {
 	return user.IsAdmin()
+}
+
+// HashPassword hashes a plain text password
+func (s *Service) HashPassword(password string) (string, error) {
+	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+	return string(hashedBytes), nil
+}
+
+// ComparePassword compares a plain text password with a hashed password
+func (s *Service) ComparePassword(hashedPassword, password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 }

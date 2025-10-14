@@ -9,7 +9,7 @@ import (
 
 // RegisterUserRoutes sets up all user management routes
 // Only includes IMPLEMENTED endpoints (no TODOs)
-func RegisterUserRoutes(r chi.Router, h *handlers.AuthHandlerV2, authMW *middleware.AuthMiddleware) {
+func RegisterUserRoutes(r chi.Router, h *handlers.AuthHandler, authMW *middleware.AuthMiddleware) {
 	// ========================================================================
 	// USER ROUTES (authentication required)
 	// ========================================================================

@@ -1,4 +1,7 @@
-// path: backend/cmd/api/router.go
+// ============================================================================
+// FILE: backend/cmd/api/router.go
+// ✅ COMPLETE FIXED VERSION - Works with updated container.go
+// ============================================================================
 package main
 
 import (
@@ -46,7 +49,7 @@ func setupRouter(container *Container) *chi.Mux {
 	// API V2 ROUTES (Clean Architecture)
 	// ============================================================================
 	r.Route("/api/v2", func(r chi.Router) {
-		// Register all route groups from separate files
+		// ✅ This now works because container.AuthHandler is *handlers.AuthHandler
 		routes.RegisterAuthRoutes(r, container.AuthHandler, container.AuthMiddleware)
 		routes.RegisterUserRoutes(r, container.AuthHandler, container.AuthMiddleware)
 		routes.RegisterTeamRoutes(r, container.TeamHandler, container.AuthMiddleware)

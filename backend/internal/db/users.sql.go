@@ -10,7 +10,26 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
+
+const BulkUpdateUserStatus = `-- name: BulkUpdateUserStatus :exec
+UPDATE users
+SET 
+    is_active = $2,
+    updated_at = NOW()
+WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL
+`
+
+type BulkUpdateUserStatusParams struct {
+	Column1  []uuid.UUID  `db:"column_1" json:"column_1"`
+	IsActive sql.NullBool `db:"is_active" json:"is_active"`
+}
+
+func (q *Queries) BulkUpdateUserStatus(ctx context.Context, arg BulkUpdateUserStatusParams) error {
+	_, err := q.db.ExecContext(ctx, BulkUpdateUserStatus, pq.Array(arg.Column1), arg.IsActive)
+	return err
+}
 
 const CheckEmailExists = `-- name: CheckEmailExists :one
 SELECT EXISTS(
@@ -38,6 +57,39 @@ func (q *Queries) CheckUsernameExists(ctx context.Context, username string) (boo
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const CountUnverifiedUsers = `-- name: CountUnverifiedUsers :one
+SELECT COUNT(*) FROM users WHERE email_verified = FALSE AND deleted_at IS NULL
+`
+
+func (q *Queries) CountUnverifiedUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, CountUnverifiedUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const CountUsers = `-- name: CountUsers :one
+SELECT COUNT(*) FROM users WHERE deleted_at IS NULL
+`
+
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, CountUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const CountVerifiedUsers = `-- name: CountVerifiedUsers :one
+SELECT COUNT(*) FROM users WHERE email_verified = TRUE AND deleted_at IS NULL
+`
+
+func (q *Queries) CountVerifiedUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, CountVerifiedUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const CreateUser = `-- name: CreateUser :one
@@ -95,7 +147,7 @@ type CreateUserRow struct {
 }
 
 // backend/sql/users.sql
-// User CRUD operations
+// ✅ FIXED - User CRUD operations aligned with repository
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRowContext(ctx, CreateUser,
 		arg.Email,
@@ -373,9 +425,133 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 	return i, err
 }
 
+const GetUsersByRole = `-- name: GetUsersByRole :many
+SELECT id, email, username FROM users WHERE deleted_at IS NULL
+`
+
+type GetUsersByRoleRow struct {
+	ID       uuid.UUID `db:"id" json:"id"`
+	Email    string    `db:"email" json:"email"`
+	Username string    `db:"username" json:"username"`
+}
+
+// Note: This requires adding a 'role' column to users table
+// For now, this is a placeholder
+func (q *Queries) GetUsersByRole(ctx context.Context) ([]GetUsersByRoleRow, error) {
+	rows, err := q.db.QueryContext(ctx, GetUsersByRole)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUsersByRoleRow{}
+	for rows.Next() {
+		var i GetUsersByRoleRow
+		if err := rows.Scan(&i.ID, &i.Email, &i.Username); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const ListUsers = `-- name: ListUsers :many
+
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+       avatar_url, timezone, locale, is_active,
+       verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+       last_login_at, created_at, updated_at, deleted_at
+FROM users
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListUsersParams struct {
+	Limit  int32 `db:"limit" json:"limit"`
+	Offset int32 `db:"offset" json:"offset"`
+}
+
+type ListUsersRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+// ============================================================================
+// ADDITIONAL USEFUL QUERIES
+// ============================================================================
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, ListUsers, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersRow{}
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.EmailVerified,
+			&i.PasswordHash,
+			&i.Username,
+			&i.FirstName,
+			&i.LastName,
+			&i.FullName,
+			&i.AvatarUrl,
+			&i.Timezone,
+			&i.Locale,
+			&i.IsActive,
+			&i.VerificationToken,
+			&i.VerificationTokenExpiresAt,
+			&i.ResetToken,
+			&i.ResetTokenExpiresAt,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const SoftDeleteUser = `-- name: SoftDeleteUser :exec
 UPDATE users
-SET deleted_at = NOW()
+SET 
+    deleted_at = NOW(),
+    updated_at = NOW()
 WHERE id = $1
 `
 
@@ -386,9 +562,10 @@ func (q *Queries) SoftDeleteUser(ctx context.Context, id uuid.UUID) error {
 
 const UpdateUserLastLogin = `-- name: UpdateUserLastLogin :exec
 UPDATE users
-SET last_login_at = NOW(),
+SET 
+    last_login_at = NOW(),
     updated_at = NOW()
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
@@ -398,7 +575,8 @@ func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
 
 const UpdateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users
-SET password_hash = $2,
+SET 
+    password_hash = $2,
     updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL
 `
@@ -416,26 +594,26 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 const UpdateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
 SET 
-    username = COALESCE($1, username),
-    first_name = COALESCE($2, first_name),
-    last_name = COALESCE($3, last_name),
-    avatar_url = COALESCE($4, avatar_url),
-    timezone = COALESCE($5, timezone),
+    username = $2,           -- Changed from COALESCE to direct assignment
+    first_name = $3,         -- Changed from COALESCE to direct assignment
+    last_name = $4,          -- Changed from COALESCE to direct assignment
+    avatar_url = COALESCE($5, avatar_url),  -- Keep optional
+    timezone = COALESCE($6, timezone),      -- Keep optional
     updated_at = NOW()
-WHERE id = $6 AND deleted_at IS NULL
+WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
-          avatar_url, timezone, locale, is_active,
+          avatar_url, timezone, locale, is_active, 
           verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
           last_login_at, created_at, updated_at, deleted_at
 `
 
 type UpdateUserProfileParams struct {
+	ID        uuid.UUID      `db:"id" json:"id"`
 	Username  string         `db:"username" json:"username"`
 	FirstName string         `db:"first_name" json:"first_name"`
 	LastName  string         `db:"last_name" json:"last_name"`
 	AvatarUrl sql.NullString `db:"avatar_url" json:"avatar_url"`
 	Timezone  sql.NullString `db:"timezone" json:"timezone"`
-	ID        uuid.UUID      `db:"id" json:"id"`
 }
 
 type UpdateUserProfileRow struct {
@@ -461,14 +639,15 @@ type UpdateUserProfileRow struct {
 	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
 }
 
+// ✅ FIX: Change nullable params to non-nullable for required fields
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error) {
 	row := q.db.QueryRowContext(ctx, UpdateUserProfile,
+		arg.ID,
 		arg.Username,
 		arg.FirstName,
 		arg.LastName,
 		arg.AvatarUrl,
 		arg.Timezone,
-		arg.ID,
 	)
 	var i UpdateUserProfileRow
 	err := row.Scan(
@@ -494,4 +673,22 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const UpdateUserStatus = `-- name: UpdateUserStatus :exec
+UPDATE users
+SET 
+    is_active = $2,
+    updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type UpdateUserStatusParams struct {
+	ID       uuid.UUID    `db:"id" json:"id"`
+	IsActive sql.NullBool `db:"is_active" json:"is_active"`
+}
+
+func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) error {
+	_, err := q.db.ExecContext(ctx, UpdateUserStatus, arg.ID, arg.IsActive)
+	return err
 }

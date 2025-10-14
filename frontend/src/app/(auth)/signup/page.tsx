@@ -1,4 +1,5 @@
-// path: frontend/src/app/(auth)/signup/page.tsx
+// frontend/src/app/(auth)/signup/page.tsx
+// Professional Signup Page - Fully Aligned with Backend
 
 'use client';
 
@@ -19,7 +20,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2 } from 'lucide-react';
+import { Loader2, UserPlus, Check } from 'lucide-react';
 
 // Validation schema - aligned with backend
 const signupSchema = z
@@ -37,32 +38,79 @@ const signupSchema = z
 
 type SignupFormData = z.infer<typeof signupSchema>;
 
+// Password strength indicator
+function PasswordStrength({ password }: { password: string }) {
+  if (!password) return null;
+
+  const strength = calculatePasswordStrength(password);
+  const strengthColors = {
+    weak: 'bg-red-500',
+    fair: 'bg-yellow-500',
+    good: 'bg-blue-500',
+    strong: 'bg-green-500',
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1">
+        {[...Array(4)].map((_, i) => (
+          <div
+            key={i}
+            className={`h-1 w-full rounded-full ${
+              i < strength.level ? strengthColors[strength.label as keyof typeof strengthColors] : 'bg-gray-200 dark:bg-gray-700'
+            }`}
+          />
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Password strength: <span className="font-medium">{strength.label}</span>
+      </p>
+    </div>
+  );
+}
+
+function calculatePasswordStrength(password: string) {
+  let level = 0;
+  if (password.length >= 8) level++;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) level++;
+  if (/[0-9]/.test(password)) level++;
+  if (/[^a-zA-Z0-9]/.test(password)) level++;
+
+  const labels = ['weak', 'fair', 'good', 'strong'];
+  return { level, label: labels[level - 1] || 'weak' };
+}
+
 export default function SignupPage() {
   const { mutate: signup, isPending, error } = useSignup();
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
   });
 
+  const password = watch('password');
+
   const onSubmit = (data: SignupFormData) => {
-    // Extract only the fields needed for the API (remove confirmPassword)
     const { confirmPassword, ...signupData } = data;
     signup(signupData);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4 py-8">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">
-            Create an account
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 px-4 py-8">
+      <Card className="w-full max-w-lg shadow-2xl border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
+        <CardHeader className="space-y-1 text-center pb-6">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg">
+            <UserPlus className="h-8 w-8 text-white" />
+          </div>
+          <CardTitle className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            Create Account
           </CardTitle>
-          <CardDescription className="text-center">
-            Get started with your free account today
+          <CardDescription className="text-base">
+            Start managing your social media effortlessly
           </CardDescription>
         </CardHeader>
 
@@ -91,7 +139,7 @@ export default function SignupPage() {
                   className={errors.firstName ? 'border-red-500' : ''}
                 />
                 {errors.firstName && (
-                  <p className="text-sm text-red-500">{errors.firstName.message}</p>
+                  <p className="text-xs text-red-600">{errors.firstName.message}</p>
                 )}
               </div>
 
@@ -107,7 +155,7 @@ export default function SignupPage() {
                   className={errors.lastName ? 'border-red-500' : ''}
                 />
                 {errors.lastName && (
-                  <p className="text-sm text-red-500">{errors.lastName.message}</p>
+                  <p className="text-xs text-red-600">{errors.lastName.message}</p>
                 )}
               </div>
             </div>
@@ -125,11 +173,11 @@ export default function SignupPage() {
                 className={errors.email ? 'border-red-500' : ''}
               />
               {errors.email && (
-                <p className="text-sm text-red-500">{errors.email.message}</p>
+                <p className="text-xs text-red-600">{errors.email.message}</p>
               )}
             </div>
 
-            {/* Password field */}
+            {/* Password field with strength indicator */}
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -142,11 +190,9 @@ export default function SignupPage() {
                 className={errors.password ? 'border-red-500' : ''}
               />
               {errors.password && (
-                <p className="text-sm text-red-500">{errors.password.message}</p>
+                <p className="text-xs text-red-600">{errors.password.message}</p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Must be at least 8 characters long
-              </p>
+              <PasswordStrength password={password} />
             </div>
 
             {/* Confirm Password field */}
@@ -162,44 +208,62 @@ export default function SignupPage() {
                 className={errors.confirmPassword ? 'border-red-500' : ''}
               />
               {errors.confirmPassword && (
-                <p className="text-sm text-red-500">
-                  {errors.confirmPassword.message}
-                </p>
+                <p className="text-xs text-red-600">{errors.confirmPassword.message}</p>
               )}
             </div>
 
             {/* Terms and conditions */}
-            <p className="text-xs text-muted-foreground">
-              By signing up, you agree to our{' '}
-              <Link href="/terms" className="text-primary hover:underline">
-                Terms of Service
-              </Link>{' '}
-              and{' '}
-              <Link href="/privacy" className="text-primary hover:underline">
-                Privacy Policy
-              </Link>
-              .
-            </p>
+            <div className="flex items-start space-x-2 text-xs text-muted-foreground rounded-lg bg-muted/50 p-3">
+              <Check className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+              <p>
+                By signing up, you agree to our{' '}
+                <Link href="/terms" className="text-indigo-600 hover:underline dark:text-indigo-400">
+                  Terms of Service
+                </Link>{' '}
+                and{' '}
+                <Link href="/privacy" className="text-indigo-600 hover:underline dark:text-indigo-400">
+                  Privacy Policy
+                </Link>
+              </p>
+            </div>
           </CardContent>
 
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={isPending}>
+          <CardFooter className="flex flex-col space-y-4 pt-4">
+            <Button
+              type="submit"
+              className="w-full h-11 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-lg font-medium"
+              disabled={isPending}
+            >
               {isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                   Creating account...
                 </>
               ) : (
-                'Sign up'
+                'Create Account'
               )}
             </Button>
 
-            <p className="text-sm text-center text-muted-foreground">
-              Already have an account?{' '}
-              <Link href="/login" className="text-primary hover:underline font-medium">
-                Login
-              </Link>
-            </p>
+            <div className="relative w-full">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white dark:bg-gray-800 px-2 text-muted-foreground">
+                  Already have an account?
+                </span>
+              </div>
+            </div>
+
+            <Link href="/login" className="w-full">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-11 border-2 hover:bg-indigo-50 dark:hover:bg-indigo-950 hover:border-indigo-600 transition-colors font-medium"
+              >
+                Sign In
+              </Button>
+            </Link>
           </CardFooter>
         </form>
       </Card>

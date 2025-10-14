@@ -33,10 +33,11 @@ func RegisterAuthRoutes(r chi.Router, h *handlers.AuthHandler, authMW *middlewar
 	// ========================================================================
 	// PROTECTED AUTH ROUTES (require authentication)
 	// ========================================================================
-	r.Route("/auth", func(r chi.Router) {
+	// PROTECTED ROUTES (require authentication) - in a sub-group
+	r.Group(func(r chi.Router) {
 		r.Use(authMW.RequireAuth)
 
-		// Change password (requires current password)
-		r.Post("/change-password", h.ChangePassword)
+		r.Get("/me", h.GetUser)                      // Get current user
+		r.Post("/change-password", h.ChangePassword) // Change password
 	})
 }

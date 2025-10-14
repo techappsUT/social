@@ -1,4 +1,5 @@
-// path: frontend/src/hooks/useAuth.ts
+// frontend/src/hooks/useAuth.ts
+// FIXED VERSION - Aligned with Backend
 
 'use client';
 
@@ -26,8 +27,9 @@ async function loginRequest(credentials: LoginCredentials): Promise<AuthResponse
   });
 }
 
-async function signupRequest(credentials: SignupCredentials): Promise<MessageResponse> {
-  return apiClient.post<MessageResponse>('/auth/signup', credentials, {
+async function signupRequest(credentials: SignupCredentials): Promise<AuthResponse> {
+  // ✅ FIX: Backend returns AuthResponse on signup, not MessageResponse
+  return apiClient.post<AuthResponse>('/auth/signup', credentials, {
     skipAuth: true,
   });
 }
@@ -37,7 +39,8 @@ async function logoutRequest(): Promise<MessageResponse> {
 }
 
 async function getCurrentUser(): Promise<UserInfo> {
-  return apiClient.get<UserInfo>('/api/me');
+  // ✅ FIX: Changed from '/api/me' to '/auth/me'
+  return apiClient.get<UserInfo>('/auth/me');
 }
 
 async function verifyEmailRequest(data: VerifyEmailRequest): Promise<MessageResponse> {
@@ -54,6 +57,12 @@ async function forgotPasswordRequest(data: ForgotPasswordRequest): Promise<Messa
 
 async function resetPasswordRequest(data: ResetPasswordRequest): Promise<MessageResponse> {
   return apiClient.post<MessageResponse>('/auth/reset-password', data, {
+    skipAuth: true,
+  });
+}
+
+async function resendVerificationRequest(email: string): Promise<MessageResponse> {
+  return apiClient.post<MessageResponse>('/auth/resend-verification', { email }, {
     skipAuth: true,
   });
 }
@@ -90,12 +99,17 @@ export function useLogin() {
  */
 export function useSignup() {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: signupRequest,
-    onSuccess: () => {
-      // Redirect to login with success message
-      router.push('/login?registered=true');
+    onSuccess: (data) => {
+      // ✅ FIX: Backend auto-logs in on signup, so store token and redirect
+      apiClient.setAccessToken(data.accessToken);
+      queryClient.setQueryData(['user'], data.user);
+
+      // Redirect to dashboard (or show email verification prompt if needed)
+      router.push('/dashboard');
     },
   });
 }
@@ -169,6 +183,15 @@ export function useResetPassword() {
     onSuccess: () => {
       router.push('/login?reset=true');
     },
+  });
+}
+
+/**
+ * useResendVerification - Resend verification email hook
+ */
+export function useResendVerification() {
+  return useMutation({
+    mutationFn: resendVerificationRequest,
   });
 }
 

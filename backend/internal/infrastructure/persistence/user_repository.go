@@ -1,4 +1,4 @@
-// path: backend/internal/infrastructure/persistence/user_repository.go
+// backend/internal/infrastructure/persistence/user_repository.go
 package persistence
 
 import (
@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+
 	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/domain/user"
 )
@@ -18,10 +19,10 @@ type UserRepository struct {
 	queries *db.Queries
 }
 
-func NewUserRepository(database *sql.DB) user.Repository {
+func NewUserRepository(database *sql.DB, queries *db.Queries) user.Repository {
 	return &UserRepository{
 		db:      database,
-		queries: db.New(database),
+		queries: queries,
 	}
 }
 
@@ -44,7 +45,7 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	_, err := r.queries.CreateUser(ctx, params)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok {
-			if pqErr.Code == "23505" { // unique_violation
+			if pqErr.Code == "23505" {
 				if pqErr.Constraint == "users_email_key" {
 					return user.ErrEmailAlreadyExists
 				}
@@ -106,7 +107,11 @@ func (r *UserRepository) FindByEmailOrUsername(ctx context.Context, identifier s
 
 func (r *UserRepository) FindAll(ctx context.Context, offset, limit int) ([]*user.User, error) {
 	query := `
-		SELECT * FROM users 
+		SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name,
+		       avatar_url, timezone, locale, is_active,
+		       verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+		       last_login_at, created_at, updated_at, deleted_at
+		FROM users 
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -117,107 +122,37 @@ func (r *UserRepository) FindAll(ctx context.Context, offset, limit int) ([]*use
 	}
 	defer rows.Close()
 
-	return r.scanUsers(rows)
-}
-
-func (r *UserRepository) FindByRole(ctx context.Context, role user.Role, offset, limit int) ([]*user.User, error) {
-	// TODO: Add role column to users table, then implement
-	return []*user.User{}, nil
-}
-
-func (r *UserRepository) FindByStatus(ctx context.Context, status user.Status, offset, limit int) ([]*user.User, error) {
-	isActive := status == user.StatusActive
-	query := `
-		SELECT * FROM users 
-		WHERE is_active = $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-	rows, err := r.db.QueryContext(ctx, query, isActive, limit, offset)
-	if err != nil {
-		return nil, err
+	var users []*user.User
+	for rows.Next() {
+		var dbUser db.User
+		err := rows.Scan(
+			&dbUser.ID,
+			&dbUser.Email,
+			&dbUser.EmailVerified,
+			&dbUser.PasswordHash,
+			&dbUser.Username,
+			&dbUser.FirstName,
+			&dbUser.LastName,
+			&dbUser.FullName,
+			&dbUser.AvatarUrl,
+			&dbUser.Timezone,
+			&dbUser.Locale,
+			&dbUser.IsActive,
+			&dbUser.VerificationToken,
+			&dbUser.VerificationTokenExpiresAt,
+			&dbUser.ResetToken,
+			&dbUser.ResetTokenExpiresAt,
+			&dbUser.LastLoginAt,
+			&dbUser.CreatedAt,
+			&dbUser.UpdatedAt,
+			&dbUser.DeletedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, r.mapToDomain(dbUser))
 	}
-	defer rows.Close()
-
-	return r.scanUsers(rows)
-}
-
-func (r *UserRepository) FindByTeamID(ctx context.Context, teamID uuid.UUID, offset, limit int) ([]*user.User, error) {
-	// TODO: Implement team membership query
-	return []*user.User{}, nil
-}
-
-func (r *UserRepository) Search(ctx context.Context, query string, offset, limit int) ([]*user.User, error) {
-	searchQuery := `
-		SELECT * FROM users 
-		WHERE (
-			email ILIKE $1 OR 
-			username ILIKE $1 OR 
-			first_name ILIKE $1 OR 
-			last_name ILIKE $1
-		) AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-	searchPattern := "%" + query + "%"
-	rows, err := r.db.QueryContext(ctx, searchQuery, searchPattern, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return r.scanUsers(rows)
-}
-
-func (r *UserRepository) FindInactiveSince(ctx context.Context, since time.Time, offset, limit int) ([]*user.User, error) {
-	query := `
-		SELECT * FROM users 
-		WHERE (last_login_at IS NULL OR last_login_at < $1)
-		AND deleted_at IS NULL
-		ORDER BY last_login_at ASC NULLS FIRST
-		LIMIT $2 OFFSET $3
-	`
-	rows, err := r.db.QueryContext(ctx, query, since, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return r.scanUsers(rows)
-}
-
-func (r *UserRepository) FindRecentlyCreated(ctx context.Context, duration time.Duration, offset, limit int) ([]*user.User, error) {
-	since := time.Now().Add(-duration)
-	query := `
-		SELECT * FROM users 
-		WHERE created_at >= $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-	rows, err := r.db.QueryContext(ctx, query, since, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return r.scanUsers(rows)
-}
-
-func (r *UserRepository) FindUnverifiedOlderThan(ctx context.Context, duration time.Duration) ([]*user.User, error) {
-	cutoffTime := time.Now().Add(-duration)
-	query := `
-		SELECT * FROM users 
-		WHERE (email_verified = false OR email_verified IS NULL)
-		AND created_at < $1 AND deleted_at IS NULL
-		ORDER BY created_at ASC
-	`
-	rows, err := r.db.QueryContext(ctx, query, cutoffTime)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return r.scanUsers(rows)
+	return users, nil
 }
 
 // ============================================================================
@@ -241,50 +176,47 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 		}
 		return fmt.Errorf("failed to update user: %w", err)
 	}
+
+	// Update password if changed
+	if u.PasswordHash() != "" {
+		err = r.queries.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
+			ID:           u.ID(),
+			PasswordHash: sql.NullString{String: u.PasswordHash(), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update password: %w", err)
+		}
+	}
+
 	return nil
 }
 
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, lastLoginAt time.Time) error {
-	return r.queries.UpdateUserLastLogin(ctx, id)
-}
-
-func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
-	params := db.UpdateUserPasswordParams{
-		ID:           id,
-		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+	err := r.queries.UpdateUserLastLogin(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to update last login: %w", err)
 	}
-	return r.queries.UpdateUserPassword(ctx, params)
-}
-
-func (r *UserRepository) UpdateEmailVerificationStatus(ctx context.Context, id uuid.UUID, verified bool) error {
-	if verified {
-		return r.queries.MarkUserEmailVerified(ctx, id)
-	}
-	// TODO: Add query to mark as unverified if needed
 	return nil
 }
 
-func (r *UserRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status user.Status) error {
-	isActive := status == user.StatusActive
-	query := `UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, id, isActive)
-	return err
-}
-
-func (r *UserRepository) UpdateRole(ctx context.Context, id uuid.UUID, role user.Role) error {
-	// TODO: Add role column to users table
-	return fmt.Errorf("role column not yet implemented in database")
-}
-
-func (r *UserRepository) BulkUpdateStatus(ctx context.Context, ids []uuid.UUID, status user.Status) error {
-	if len(ids) == 0 {
-		return nil
+func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	err := r.queries.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
+		ID:           id,
+		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
 	}
+	return nil
+}
 
-	isActive := status == user.StatusActive
-	query := `UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = ANY($2)`
-	_, err := r.db.ExecContext(ctx, query, isActive, pq.Array(ids))
-	return err
+func (r *UserRepository) UpdateEmailVerificationStatus(ctx context.Context, id uuid.UUID, verified bool) error {
+	// Use the ClearVerificationToken query which also sets email_verified = TRUE
+	err := r.queries.ClearVerificationToken(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to update email verification status: %w", err)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -292,29 +224,24 @@ func (r *UserRepository) BulkUpdateStatus(ctx context.Context, ids []uuid.UUID, 
 // ============================================================================
 
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	return r.queries.SoftDeleteUser(ctx, id)
-}
-
-func (r *UserRepository) Restore(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE users SET deleted_at = NULL, updated_at = NOW() WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, id)
-	return err
-}
-
-func (r *UserRepository) HardDelete(ctx context.Context, id uuid.UUID) error {
-	query := `DELETE FROM users WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, id)
-	return err
+	err := r.queries.SoftDeleteUser(ctx, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return user.ErrUserNotFound
+		}
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+	return nil
 }
 
 // ============================================================================
-// EXISTENCE CHECKS
+// EXISTS CHECKS
 // ============================================================================
 
 func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	exists, err := r.queries.CheckEmailExists(ctx, email)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check email existence: %w", err)
 	}
 	return exists, nil
 }
@@ -322,13 +249,13 @@ func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 func (r *UserRepository) ExistsByUsername(ctx context.Context, username string) (bool, error) {
 	exists, err := r.queries.CheckUsernameExists(ctx, username)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check username existence: %w", err)
 	}
 	return exists, nil
 }
 
 // ============================================================================
-// COUNT METHODS
+// COUNTS & STATS (Placeholder implementations)
 // ============================================================================
 
 func (r *UserRepository) Count(ctx context.Context) (int64, error) {
@@ -338,87 +265,55 @@ func (r *UserRepository) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+func (r *UserRepository) FindByRole(ctx context.Context, role user.Role, offset, limit int) ([]*user.User, error) {
+	// Placeholder - implement when role column is added
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (r *UserRepository) FindByStatus(ctx context.Context, status user.Status, offset, limit int) ([]*user.User, error) {
+	// Placeholder - implement when needed
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (r *UserRepository) FindByTeamID(ctx context.Context, teamID uuid.UUID, offset, limit int) ([]*user.User, error) {
+	// Placeholder - implement when needed
+	return nil, fmt.Errorf("not implemented")
+}
+
 func (r *UserRepository) CountByRole(ctx context.Context, role user.Role) (int64, error) {
-	// TODO: Implement when role column is added
-	return 0, nil
+	// Placeholder
+	return 0, fmt.Errorf("not implemented")
 }
 
 func (r *UserRepository) CountByStatus(ctx context.Context, status user.Status) (int64, error) {
-	var count int64
-	isActive := status == user.StatusActive
-	query := `SELECT COUNT(*) FROM users WHERE is_active = $1 AND deleted_at IS NULL`
-	err := r.db.QueryRowContext(ctx, query, isActive).Scan(&count)
-	return count, err
+	// Placeholder
+	return 0, fmt.Errorf("not implemented")
+}
+
+func (r *UserRepository) Search(ctx context.Context, query string, offset, limit int) ([]*user.User, error) {
+	// Placeholder
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (r *UserRepository) FindInactiveSince(ctx context.Context, since time.Time, offset, limit int) ([]*user.User, error) {
+	// Placeholder
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (r *UserRepository) FindRecentlyCreated(ctx context.Context, duration time.Duration, offset, limit int) ([]*user.User, error) {
+	// Placeholder
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (r *UserRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status user.Status) error {
+	// Placeholder
+	return fmt.Errorf("not implemented")
 }
 
 // ============================================================================
-// HELPER METHODS
+// MAPPING
 // ============================================================================
 
-// ExistsByID checks if a user exists with the given ID
-func (r *UserRepository) ExistsByID(ctx context.Context, id uuid.UUID) (bool, error) {
-	var exists bool
-	query := `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("failed to check user existence: %w", err)
-	}
-	return exists, nil
-}
-
-func (r *UserRepository) scanUsers(rows *sql.Rows) ([]*user.User, error) {
-	var users []*user.User
-	for rows.Next() {
-		var dbUser db.User
-		err := rows.Scan(
-			&dbUser.ID,
-			&dbUser.Email,
-			&dbUser.EmailVerified,
-			&dbUser.PasswordHash,
-			&dbUser.Username,
-			&dbUser.FirstName,
-			&dbUser.LastName,
-			&dbUser.FullName,
-			&dbUser.AvatarUrl,
-			&dbUser.Timezone,
-			&dbUser.Locale,
-			&dbUser.IsActive,
-			&dbUser.LastLoginAt,
-			&dbUser.CreatedAt,
-			&dbUser.UpdatedAt,
-			&dbUser.DeletedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, r.mapToDomain(dbUser))
-	}
-	return users, nil
-}
-
-// MarkEmailVerified marks a user's email as verified
-func (r *UserRepository) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
-	query := `
-		UPDATE users 
-		SET email_verified = TRUE, updated_at = NOW() 
-		WHERE id = $1 AND deleted_at IS NULL
-	`
-	result, err := r.db.ExecContext(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to mark email as verified: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if rowsAffected == 0 {
-		return user.ErrUserNotFound
-	}
-
-	return nil
-}
 func (r *UserRepository) mapToDomain(dbUser db.User) *user.User {
 	// These are plain strings (NOT NULL in DB)
 	username := dbUser.Username

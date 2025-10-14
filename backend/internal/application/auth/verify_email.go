@@ -1,12 +1,14 @@
-// path: backend/internal/application/auth/verify_email.go
+// backend/internal/application/auth/verify_email.go
 package auth
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/techappsUT/social-queue/internal/application/common"
+	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/domain/user"
 )
 
@@ -15,10 +17,9 @@ import (
 // ============================================================================
 
 type VerifyEmailUseCase struct {
-	userRepo     user.Repository
-	userService  *user.Service
-	emailService common.EmailService
-	logger       common.Logger
+	userRepo user.Repository
+	queries  *db.Queries
+	logger   common.Logger
 }
 
 type VerifyEmailInput struct {
@@ -26,47 +27,59 @@ type VerifyEmailInput struct {
 }
 
 type VerifyEmailOutput struct {
-	Success       bool       `json:"success"`
-	Message       string     `json:"message"`
-	Email         string     `json:"email"`
-	EmailVerified bool       `json:"emailVerified"`
-	VerifiedAt    *time.Time `json:"verifiedAt,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 func NewVerifyEmailUseCase(
 	userRepo user.Repository,
-	userService *user.Service,
-	emailService common.EmailService,
+	queries *db.Queries,
 	logger common.Logger,
 ) *VerifyEmailUseCase {
 	return &VerifyEmailUseCase{
-		userRepo:     userRepo,
-		userService:  userService,
-		emailService: emailService,
-		logger:       logger,
+		userRepo: userRepo,
+		queries:  queries,
+		logger:   logger,
 	}
 }
 
 func (uc *VerifyEmailUseCase) Execute(ctx context.Context, input VerifyEmailInput) (*VerifyEmailOutput, error) {
-	// Validate input
-	if input.Token == "" {
-		return nil, fmt.Errorf("verification token is required")
+	// 1. Get user by verification token
+	dbUser, err := uc.queries.GetUserByVerificationToken(ctx, sql.NullString{
+		String: input.Token,
+		Valid:  true,
+	})
+	if err != nil {
+		uc.logger.Warn("Invalid verification token attempt", "token", input.Token[:10]+"...")
+		return nil, fmt.Errorf("invalid or expired verification token")
 	}
 
-	// TODO: In a real implementation, you would:
-	// 1. Look up the token in an email_verification_tokens table
-	// 2. Check if the token is expired
-	// 3. Get the user_id associated with the token
-	// 4. Mark the token as used
+	// 2. Get domain user
+	usr, err := uc.userRepo.FindByID(ctx, dbUser.ID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found")
+	}
 
-	// For now, this is a placeholder that searches all users
-	// In production, you need a proper token-to-user mapping table
+	// 3. Check if already verified
+	if usr.IsEmailVerified() {
+		return &VerifyEmailOutput{
+			Success: true,
+			Message: "Email already verified",
+		}, nil
+	}
 
-	uc.logger.Info("Email verification requested", "token", input.Token[:10]+"...")
+	// 4. Mark email as verified and clear token
+	if err := uc.queries.ClearVerificationToken(ctx, dbUser.ID); err != nil {
+		uc.logger.Error("Failed to clear verification token", "userId", dbUser.ID, "error", err)
+		return nil, fmt.Errorf("failed to verify email")
+	}
 
-	// TODO: Replace with actual token lookup
-	// For now, return error since we don't have token table implemented
-	return nil, fmt.Errorf("email verification token system not yet implemented - requires email_verification_tokens table")
+	uc.logger.Info("Email verified successfully", "userId", dbUser.ID)
+
+	return &VerifyEmailOutput{
+		Success: true,
+		Message: "Email verified successfully",
+	}, nil
 }
 
 // ============================================================================
@@ -75,6 +88,7 @@ func (uc *VerifyEmailUseCase) Execute(ctx context.Context, input VerifyEmailInpu
 
 type ResendVerificationUseCase struct {
 	userRepo     user.Repository
+	queries      *db.Queries
 	emailService common.EmailService
 	logger       common.Logger
 }
@@ -90,11 +104,13 @@ type ResendVerificationOutput struct {
 
 func NewResendVerificationUseCase(
 	userRepo user.Repository,
+	queries *db.Queries,
 	emailService common.EmailService,
 	logger common.Logger,
 ) *ResendVerificationUseCase {
 	return &ResendVerificationUseCase{
 		userRepo:     userRepo,
+		queries:      queries,
 		emailService: emailService,
 		logger:       logger,
 	}
@@ -127,7 +143,17 @@ func (uc *ResendVerificationUseCase) Execute(ctx context.Context, input ResendVe
 		return nil, fmt.Errorf("failed to generate verification token")
 	}
 
-	// TODO: Store token in email_verification_tokens table with expiry (24 hours)
+	// Store token in database (24 hours expiry)
+	expiresAt := time.Now().Add(24 * time.Hour)
+	err = uc.queries.SetVerificationToken(ctx, db.SetVerificationTokenParams{
+		ID:                         usr.ID(),
+		VerificationToken:          sql.NullString{String: token, Valid: true},
+		VerificationTokenExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+	})
+	if err != nil {
+		uc.logger.Error("Failed to store verification token", "error", err)
+		return nil, fmt.Errorf("failed to generate verification token")
+	}
 
 	// Send verification email
 	if err := uc.emailService.SendVerificationEmail(ctx, usr.Email(), token); err != nil {

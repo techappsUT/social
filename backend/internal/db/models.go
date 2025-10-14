@@ -1005,6 +1005,12 @@ type User struct {
 	CreatedAt   sql.NullTime   `db:"created_at" json:"created_at"`
 	UpdatedAt   sql.NullTime   `db:"updated_at" json:"updated_at"`
 	DeletedAt   sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+	// Email verification token (expires in 24 hours)
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	// Password reset token (expires in 1 hour)
+	ResetToken          sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
 }
 
 // Webhook event log

@@ -54,7 +54,10 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at
+RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+          avatar_url, timezone, locale, is_active, 
+          verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+          last_login_at, created_at, updated_at, deleted_at
 `
 
 type CreateUserParams struct {
@@ -68,8 +71,32 @@ type CreateUserParams struct {
 	Timezone      sql.NullString `db:"timezone" json:"timezone"`
 }
 
-// path: backend/sql/users.sql
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+type CreateUserRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+// backend/sql/users.sql
+// User CRUD operations
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRowContext(ctx, CreateUser,
 		arg.Email,
 		arg.EmailVerified,
@@ -80,7 +107,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.AvatarUrl,
 		arg.Timezone,
 	)
-	var i User
+	var i CreateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -94,6 +121,10 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Timezone,
 		&i.Locale,
 		&i.IsActive,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -103,13 +134,40 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const GetUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+       avatar_url, timezone, locale, is_active,
+       verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+       last_login_at, created_at, updated_at, deleted_at
+FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+type GetUserByEmailRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRowContext(ctx, GetUserByEmail, email)
-	var i User
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -123,6 +181,10 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Timezone,
 		&i.Locale,
 		&i.IsActive,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -132,13 +194,40 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const GetUserByID = `-- name: GetUserByID :one
-SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+       avatar_url, timezone, locale, is_active,
+       verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+       last_login_at, created_at, updated_at, deleted_at
+FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
+type GetUserByIDRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, GetUserByID, id)
-	var i User
+	var i GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -152,6 +241,70 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.Timezone,
 		&i.Locale,
 		&i.IsActive,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const GetUserByIdentifier = `-- name: GetUserByIdentifier :one
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+       avatar_url, timezone, locale, is_active,
+       verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+       last_login_at, created_at, updated_at, deleted_at
+FROM users
+WHERE (email = $1 OR username = $1) AND deleted_at IS NULL
+`
+
+type GetUserByIdentifierRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+func (q *Queries) GetUserByIdentifier(ctx context.Context, email string) (GetUserByIdentifierRow, error) {
+	row := q.db.QueryRowContext(ctx, GetUserByIdentifier, email)
+	var i GetUserByIdentifierRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
+		&i.FullName,
+		&i.AvatarUrl,
+		&i.Timezone,
+		&i.Locale,
+		&i.IsActive,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -161,13 +314,40 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 }
 
 const GetUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+       avatar_url, timezone, locale, is_active,
+       verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+       last_login_at, created_at, updated_at, deleted_at
+FROM users
 WHERE username = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
+type GetUserByUsernameRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
 	row := q.db.QueryRowContext(ctx, GetUserByUsername, username)
-	var i User
+	var i GetUserByUsernameRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -181,6 +361,10 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.Timezone,
 		&i.Locale,
 		&i.IsActive,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -189,24 +373,9 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 	return i, err
 }
 
-const MarkUserEmailVerified = `-- name: MarkUserEmailVerified :exec
-UPDATE users
-SET 
-    email_verified = true,
-    updated_at = NOW()
-WHERE id = $1
-`
-
-func (q *Queries) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, MarkUserEmailVerified, id)
-	return err
-}
-
 const SoftDeleteUser = `-- name: SoftDeleteUser :exec
 UPDATE users
-SET 
-    deleted_at = NOW(),
-    updated_at = NOW()
+SET deleted_at = NOW()
 WHERE id = $1
 `
 
@@ -217,7 +386,8 @@ func (q *Queries) SoftDeleteUser(ctx context.Context, id uuid.UUID) error {
 
 const UpdateUserLastLogin = `-- name: UpdateUserLastLogin :exec
 UPDATE users
-SET last_login_at = NOW()
+SET last_login_at = NOW(),
+    updated_at = NOW()
 WHERE id = $1
 `
 
@@ -228,8 +398,7 @@ func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
 
 const UpdateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users
-SET 
-    password_hash = $2,
+SET password_hash = $2,
     updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL
 `
@@ -254,19 +423,45 @@ SET
     timezone = COALESCE($5, timezone),
     updated_at = NOW()
 WHERE id = $6 AND deleted_at IS NULL
-RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at
+RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
+          avatar_url, timezone, locale, is_active,
+          verification_token, verification_token_expires_at, reset_token, reset_token_expires_at,
+          last_login_at, created_at, updated_at, deleted_at
 `
 
 type UpdateUserProfileParams struct {
-	Username  sql.NullString `db:"username" json:"username"`
-	FirstName sql.NullString `db:"first_name" json:"first_name"`
-	LastName  sql.NullString `db:"last_name" json:"last_name"`
+	Username  string         `db:"username" json:"username"`
+	FirstName string         `db:"first_name" json:"first_name"`
+	LastName  string         `db:"last_name" json:"last_name"`
 	AvatarUrl sql.NullString `db:"avatar_url" json:"avatar_url"`
 	Timezone  sql.NullString `db:"timezone" json:"timezone"`
 	ID        uuid.UUID      `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
+type UpdateUserProfileRow struct {
+	ID                         uuid.UUID      `db:"id" json:"id"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	FullName                   sql.NullString `db:"full_name" json:"full_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	Locale                     sql.NullString `db:"locale" json:"locale"`
+	IsActive                   sql.NullBool   `db:"is_active" json:"is_active"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
+	ResetToken                 sql.NullString `db:"reset_token" json:"reset_token"`
+	ResetTokenExpiresAt        sql.NullTime   `db:"reset_token_expires_at" json:"reset_token_expires_at"`
+	LastLoginAt                sql.NullTime   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt                  sql.NullTime   `db:"created_at" json:"created_at"`
+	UpdatedAt                  sql.NullTime   `db:"updated_at" json:"updated_at"`
+	DeletedAt                  sql.NullTime   `db:"deleted_at" json:"deleted_at"`
+}
+
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error) {
 	row := q.db.QueryRowContext(ctx, UpdateUserProfile,
 		arg.Username,
 		arg.FirstName,
@@ -275,7 +470,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		arg.Timezone,
 		arg.ID,
 	)
-	var i User
+	var i UpdateUserProfileRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -289,6 +484,10 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.Timezone,
 		&i.Locale,
 		&i.IsActive,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,

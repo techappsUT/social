@@ -1,4 +1,4 @@
-// path: backend/internal/handlers/routes/auth_routes.go
+// backend/internal/handlers/routes/auth_routes.go
 package routes
 
 import (
@@ -8,23 +8,35 @@ import (
 )
 
 // RegisterAuthRoutes sets up all authentication-related routes
-// Only includes IMPLEMENTED endpoints (no TODOs)
-func RegisterAuthRoutes(r chi.Router, h *handlers.AuthHandlerV2, authMW *middleware.AuthMiddleware) {
+func RegisterAuthRoutes(r chi.Router, h *handlers.AuthHandler, authMW *middleware.AuthMiddleware) {
 	// ========================================================================
 	// PUBLIC AUTH ROUTES (no authentication required)
 	// ========================================================================
 	r.Route("/auth", func(r chi.Router) {
-		// ✅ Implemented endpoints
+		// User registration & authentication
 		r.Post("/signup", h.Signup)
 		r.Post("/login", h.Login)
 
-		// TODO: Implement these later
-		// r.Post("/verify-email", h.VerifyEmail)
-		// r.Post("/resend-verification", h.ResendVerification)
-		// r.Post("/forgot-password", h.ForgotPassword)
-		// r.Post("/reset-password", h.ResetPassword)
-		// r.Post("/refresh", h.RefreshToken)
-		// r.Post("/logout", h.Logout)
-		// r.Post("/change-password", h.ChangePassword)
+		// Token management
+		r.Post("/refresh", h.RefreshToken)
+		r.Post("/logout", h.Logout)
+
+		// Email verification
+		r.Post("/verify-email", h.VerifyEmail)
+		r.Post("/resend-verification", h.ResendVerification)
+
+		// Password reset
+		r.Post("/forgot-password", h.ForgotPassword)
+		r.Post("/reset-password", h.ResetPassword)
+	})
+
+	// ========================================================================
+	// PROTECTED AUTH ROUTES (require authentication)
+	// ========================================================================
+	r.Route("/auth", func(r chi.Router) {
+		r.Use(authMW.RequireAuth)
+
+		// Change password (requires current password)
+		r.Post("/change-password", h.ChangePassword)
 	})
 }

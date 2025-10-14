@@ -1,25 +1,28 @@
-# path: backend/sqlc.yaml
+# backend/sqlc.yaml
 version: "2"
 sql:
+  # ============================================================================
+  # MAIN CONFIG - Existing tables (keeps sql/ directory)
+  # ============================================================================
   - engine: "postgresql"
     queries: "./sql"
-    schema: "./migrations/20240101000001_initial_schema.up.sql"
+    schema: "./sql/schema/complete_schema.sql"  # Changed this line
     gen:
       go:
         package: "db"
         out: "./internal/db"
-        sql_package: "database/sql"  # Use standard database/sql package
+        sql_package: "database/sql"
         emit_json_tags: true
         emit_db_tags: true
         emit_prepared_queries: false
-        emit_interface: false  # Don't emit DBTX interface
+        emit_interface: false
         emit_exact_table_names: false
         emit_empty_slices: true
         emit_exported_queries: true
         emit_result_struct_pointers: false
         emit_params_struct_pointers: false
         emit_methods_with_db_argument: false
-        emit_pointers_for_null_types: false  # Use sql.NullString, not *string
+        emit_pointers_for_null_types: false
         emit_enum_valid_method: true
         emit_all_enum_values: true
         json_tags_case_style: "snake"
@@ -30,3 +33,34 @@ sql:
             go_type: "time.Time"
           - db_type: "jsonb"
             go_type: "encoding/json.RawMessage"
+
+  # ============================================================================
+  # AUTH CONFIG - User auth tokens (separate directory)
+  # ============================================================================
+  - engine: "postgresql"
+    queries: "./sql/auth"
+    schema: "./sql/schema/users.sql"
+    gen:
+      go:
+        package: "db"
+        out: "./internal/db"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_db_tags: true
+        emit_prepared_queries: false
+        emit_interface: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        emit_exported_queries: true
+        emit_result_struct_pointers: false
+        emit_params_struct_pointers: false
+        emit_methods_with_db_argument: false
+        emit_pointers_for_null_types: false
+        emit_enum_valid_method: true
+        emit_all_enum_values: true
+        json_tags_case_style: "snake"
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "timestamptz"
+            go_type: "time.Time"

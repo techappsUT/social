@@ -1,12 +1,15 @@
-// path: backend/internal/application/auth/password_reset.go
+// backend/internal/application/auth/password_reset.go
 package auth
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/techappsUT/social-queue/internal/application/common"
+	"github.com/techappsUT/social-queue/internal/db"
 	"github.com/techappsUT/social-queue/internal/domain/user"
 )
 
@@ -16,6 +19,7 @@ import (
 
 type ForgotPasswordUseCase struct {
 	userRepo     user.Repository
+	queries      *db.Queries
 	emailService common.EmailService
 	logger       common.Logger
 }
@@ -31,11 +35,13 @@ type ForgotPasswordOutput struct {
 
 func NewForgotPasswordUseCase(
 	userRepo user.Repository,
+	queries *db.Queries,
 	emailService common.EmailService,
 	logger common.Logger,
 ) *ForgotPasswordUseCase {
 	return &ForgotPasswordUseCase{
 		userRepo:     userRepo,
+		queries:      queries,
 		emailService: emailService,
 		logger:       logger,
 	}
@@ -68,8 +74,17 @@ func (uc *ForgotPasswordUseCase) Execute(ctx context.Context, input ForgotPasswo
 		return nil, fmt.Errorf("failed to generate reset token")
 	}
 
-	// TODO: Store token in database with expiry (1 hour)
-	// This would require a password_reset_tokens table
+	// Store token in database (1 hour expiry)
+	expiresAt := time.Now().Add(1 * time.Hour)
+	err = uc.queries.SetResetToken(ctx, db.SetResetTokenParams{
+		ID:                  usr.ID(),
+		ResetToken:          sql.NullString{String: token, Valid: true},
+		ResetTokenExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+	})
+	if err != nil {
+		uc.logger.Error("Failed to store reset token", "error", err)
+		return nil, fmt.Errorf("failed to generate reset token")
+	}
 
 	// Send password reset email
 	if err := uc.emailService.SendPasswordResetEmail(ctx, usr.Email(), token); err != nil {
@@ -82,6 +97,109 @@ func (uc *ForgotPasswordUseCase) Execute(ctx context.Context, input ForgotPasswo
 	return &ForgotPasswordOutput{
 		Success: true,
 		Message: "If an account with that email exists, a password reset link has been sent.",
+	}, nil
+}
+
+// ============================================================================
+// RESET PASSWORD USE CASE
+// ============================================================================
+
+type ResetPasswordUseCase struct {
+	userRepo     user.Repository
+	queries      *db.Queries
+	userService  *user.Service
+	emailService common.EmailService
+	logger       common.Logger
+}
+
+type ResetPasswordInput struct {
+	Token       string `json:"token" validate:"required"`
+	NewPassword string `json:"newPassword" validate:"required,min=8"`
+}
+
+type ResetPasswordOutput struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func NewResetPasswordUseCase(
+	userRepo user.Repository,
+	queries *db.Queries,
+	userService *user.Service,
+	emailService common.EmailService,
+	logger common.Logger,
+) *ResetPasswordUseCase {
+	return &ResetPasswordUseCase{
+		userRepo:     userRepo,
+		queries:      queries,
+		userService:  userService,
+		emailService: emailService,
+		logger:       logger,
+	}
+}
+
+func (uc *ResetPasswordUseCase) Execute(ctx context.Context, input ResetPasswordInput) (*ResetPasswordOutput, error) {
+	// Validate input
+	if input.Token == "" {
+		return nil, fmt.Errorf("reset token is required")
+	}
+	if len(input.NewPassword) < 8 {
+		return nil, fmt.Errorf("password must be at least 8 characters")
+	}
+
+	// 1. Get user by reset token
+	dbUser, err := uc.queries.GetUserByResetToken(ctx, sql.NullString{
+		String: input.Token,
+		Valid:  true,
+	})
+	if err != nil {
+		uc.logger.Warn("Invalid password reset token attempt", "token", input.Token[:10]+"...")
+		return nil, fmt.Errorf("invalid or expired reset token")
+	}
+
+	// 2. Get domain user
+	usr, err := uc.userRepo.FindByID(ctx, dbUser.ID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	// 3. Check if deleted
+	if usr.IsDeleted() {
+		return nil, fmt.Errorf("user account is deleted")
+	}
+
+	// 4. Reset password using domain method
+	if err := usr.ResetPassword(input.NewPassword); err != nil {
+		return nil, err
+	}
+
+	// 5. Update user in database
+	if err := uc.userRepo.Update(ctx, usr); err != nil {
+		uc.logger.Error("Failed to update password", "userId", usr.ID(), "error", err)
+		return nil, fmt.Errorf("failed to reset password")
+	}
+
+	// 6. Clear reset token
+	if err := uc.queries.ClearResetToken(ctx, dbUser.ID); err != nil {
+		uc.logger.Warn("Failed to clear reset token", "error", err)
+	}
+
+	// 7. Revoke all refresh tokens for security
+	if err := uc.queries.RevokeAllUserTokens(ctx, usr.ID()); err != nil {
+		uc.logger.Warn("Failed to revoke refresh tokens", "error", err)
+	}
+
+	// 8. Send confirmation email (optional)
+	go func() {
+		// Add SendPasswordChangedEmail to your email service interface
+		uc.logger.Info("Password reset successful", "userId", usr.ID())
+	}()
+
+	uc.logger.Info("Password reset successfully", "userId", usr.ID())
+
+	return &ResetPasswordOutput{
+		Success: true,
+		Message: "Password reset successfully. Please login with your new password.",
 	}, nil
 }
 
@@ -163,66 +281,5 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, input ChangePasswo
 	return &ChangePasswordOutput{
 		Success: true,
 		Message: "Password changed successfully",
-	}, nil
-}
-
-// ============================================================================
-// RESET PASSWORD USE CASE (Using reset token from forgot password flow)
-// ============================================================================
-
-type ResetPasswordUseCase struct {
-	userRepo     user.Repository
-	userService  *user.Service
-	emailService common.EmailService
-	logger       common.Logger
-}
-
-type ResetPasswordInput struct {
-	Token       string `json:"token" validate:"required"`
-	NewPassword string `json:"newPassword" validate:"required,min=8"`
-}
-
-type ResetPasswordOutput struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
-func NewResetPasswordUseCase(
-	userRepo user.Repository,
-	userService *user.Service,
-	emailService common.EmailService,
-	logger common.Logger,
-) *ResetPasswordUseCase {
-	return &ResetPasswordUseCase{
-		userRepo:     userRepo,
-		userService:  userService,
-		emailService: emailService,
-		logger:       logger,
-	}
-}
-
-func (uc *ResetPasswordUseCase) Execute(ctx context.Context, input ResetPasswordInput) (*ResetPasswordOutput, error) {
-	// Validate input
-	if input.Token == "" {
-		return nil, fmt.Errorf("reset token is required")
-	}
-	if len(input.NewPassword) < 8 {
-		return nil, fmt.Errorf("password must be at least 8 characters")
-	}
-
-	// TODO: Verify token and get user ID from password_reset_tokens table
-	// For now, this is a placeholder implementation
-
-	// This would normally be:
-	// 1. Look up token in password_reset_tokens table
-	// 2. Check if token is expired (< 1 hour old)
-	// 3. Get the user_id from the token record
-	// 4. Delete/mark token as used
-
-	uc.logger.Warn("Reset password called but token verification not implemented", "token", input.Token[:10]+"...")
-
-	return &ResetPasswordOutput{
-		Success: true,
-		Message: "Password reset successfully. Please login with your new password.",
 	}, nil
 }

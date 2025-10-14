@@ -98,6 +98,11 @@ type Repository interface {
 
 	// HardDelete permanently deletes a user (use with extreme caution)
 	HardDelete(ctx context.Context, id uuid.UUID) error
+
+	ExistsByID(ctx context.Context, id uuid.UUID) (bool, error)
+
+	// 🆕 NEW: Email verification
+	MarkEmailVerified(ctx context.Context, userID uuid.UUID) error
 }
 
 // CacheRepository defines caching operations for users

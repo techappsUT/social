@@ -1,7 +1,4 @@
-// ============================================================================
-// FILE: backend/cmd/api/router.go
-// COMPLETE VERSION - Now includes Rate Limiting Middleware
-// ============================================================================
+// path: backend/cmd/api/router.go
 package main
 
 import (
@@ -12,206 +9,67 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	appMiddleware "github.com/techappsUT/social-queue/internal/middleware"
+	"github.com/techappsUT/social-queue/internal/handlers/routes"
 )
 
-// setupRouter creates and configures the HTTP router
+// setupRouter creates and configures the HTTP router with organized route groups
 func setupRouter(container *Container) *chi.Mux {
 	r := chi.NewRouter()
 
 	// ============================================================================
-	// GLOBAL MIDDLEWARE (Applied to all routes)
+	// GLOBAL MIDDLEWARE
 	// ============================================================================
-
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
-
-	// Structured Logging
-	if container.Logger != nil {
-		r.Use(appMiddleware.RequestLogger(container.Logger))
-	}
 
 	// CORS Configuration
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   container.Config.CORS.AllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"Link", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
+		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
-	// Global IP-based Rate Limiting (1000 requests per minute per IP)
-	if container.RateLimiter != nil {
-		r.Use(container.RateLimiter.RateLimitByIP(appMiddleware.DefaultRateLimitConfigs["ip"]))
-	}
-
 	// ============================================================================
 	// PUBLIC ROUTES
 	// ============================================================================
-
 	r.Get("/", handleRoot(container))
 	r.Get("/health", handleHealth(container))
+	r.Get("/version", handleVersion(container))
 
 	// ============================================================================
 	// API V2 ROUTES (Clean Architecture)
 	// ============================================================================
-
 	r.Route("/api/v2", func(r chi.Router) {
-		// ====================================================================
-		// PUBLIC AUTHENTICATION ROUTES
-		// ====================================================================
-		r.Group(func(r chi.Router) {
-			// Stricter rate limiting for auth endpoints (10 requests per minute)
-			if container.RateLimiter != nil {
-				r.Use(container.RateLimiter.RateLimitByIP(appMiddleware.DefaultRateLimitConfigs["auth"]))
-			}
+		// Register all route groups from separate files
+		routes.RegisterAuthRoutes(r, container.AuthHandler, container.AuthMiddleware)
+		routes.RegisterUserRoutes(r, container.AuthHandler, container.AuthMiddleware)
+		routes.RegisterTeamRoutes(r, container.TeamHandler, container.AuthMiddleware)
+		routes.RegisterPostRoutes(r, container.PostHandler, container.AuthMiddleware)
 
-			r.Post("/auth/signup", container.AuthHandler.Signup)
-			r.Post("/auth/login", container.AuthHandler.Login)
-		})
+		// Social routes (only if social features enabled)
+		if container.SocialHandler != nil {
+			routes.RegisterSocialRoutes(r, container.SocialHandler, container.AuthMiddleware)
+		}
 
-		// ====================================================================
-		// PROTECTED ROUTES (require authentication)
-		// ====================================================================
-		r.Group(func(r chi.Router) {
-			r.Use(container.AuthMiddleware.RequireAuth)
-
-			// User-based rate limiting (100 requests per minute per user)
-			if container.RateLimiter != nil {
-				r.Use(container.RateLimiter.RateLimitByUser(appMiddleware.DefaultRateLimitConfigs["user"]))
-			}
-
-			// Current user route
-			r.Get("/me", handleMe)
-
-			// ================================================================
-			// USER MANAGEMENT ROUTES
-			// ================================================================
-			r.Get("/users/{id}", container.AuthHandler.GetUser)
-			r.Put("/users/{id}", container.AuthHandler.UpdateUser)
-			r.Delete("/users/{id}", container.AuthHandler.DeleteUser)
-
-			// ================================================================
-			// TEAM ROUTES
-			// ================================================================
-			r.Route("/teams", func(r chi.Router) {
-				// Team CRUD
-				r.Get("/", container.TeamHandler.ListTeams)
-				r.Post("/", container.TeamHandler.CreateTeam)
-				r.Get("/{id}", container.TeamHandler.GetTeam)
-				r.Put("/{id}", container.TeamHandler.UpdateTeam)
-				r.Delete("/{id}", container.TeamHandler.DeleteTeam)
-
-				// Team member management
-				r.Post("/{id}/members", container.TeamHandler.InviteMember)
-				r.Delete("/{id}/members/{userId}", container.TeamHandler.RemoveMember)
-				r.Patch("/{id}/members/{userId}/role", container.TeamHandler.UpdateMemberRole)
-
-				// Team's posts
-				r.Get("/{teamId}/posts", container.PostHandler.ListPosts)
-
-				// Team's social accounts
-				r.Get("/{teamId}/social/accounts", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.ListAccounts },
-					handleSocialNotAvailable,
-				))
-			})
-
-			// ================================================================
-			// POST ROUTES
-			// ================================================================
-			r.Route("/posts", func(r chi.Router) {
-				// Post CRUD
-				r.Post("/", container.PostHandler.CreateDraft)
-				r.Get("/{id}", container.PostHandler.GetPost)
-				r.Put("/{id}", container.PostHandler.UpdatePost)
-				r.Delete("/{id}", container.PostHandler.DeletePost)
-
-				// Post actions
-				r.Post("/{id}/schedule", container.PostHandler.SchedulePost)
-				r.Post("/{id}/publish", container.PostHandler.PublishNow)
-			})
-
-			// ================================================================
-			// SOCIAL OAUTH & ACCOUNT MANAGEMENT ROUTES
-			// ================================================================
-			r.Route("/social", func(r chi.Router) {
-				// OAuth flow
-				r.Get("/auth/{platform}", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.GetOAuthURL },
-					handleSocialNotAvailable,
-				))
-				r.Get("/auth/{platform}/callback", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.OAuthCallback },
-					handleSocialNotAvailable,
-				))
-
-				// Account management
-				r.Post("/accounts", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.ConnectAccount },
-					handleSocialNotAvailable,
-				))
-				r.Get("/accounts", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.ListAccounts },
-					handleSocialNotAvailable,
-				))
-				r.Delete("/accounts/{id}", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.DisconnectAccount },
-					handleSocialNotAvailable,
-				))
-
-				// Token management
-				r.Post("/accounts/{id}/refresh", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.RefreshTokens },
-					handleSocialNotAvailable,
-				))
-
-				// Analytics
-				r.Get("/accounts/{id}/analytics", conditionalHandler(
-					container.SocialHandler,
-					func() http.HandlerFunc { return container.SocialHandler.GetAnalytics },
-					handleSocialNotAvailable,
-				))
-			})
-		})
+		// TODO: Add when implemented
+		// routes.RegisterAnalyticsRoutes(r, container.AnalyticsHandler, container.AuthMiddleware)
+		// routes.RegisterBillingRoutes(r, container.BillingHandler, container.AuthMiddleware)
+		// routes.RegisterWebhookRoutes(r, container.WebhookHandler)
 	})
 
 	return r
 }
 
 // ============================================================================
-// HELPER HANDLERS
+// ROOT HANDLERS
 // ============================================================================
 
-// conditionalHandler returns a handler or fallback if handler is nil
-func conditionalHandler(handler interface{}, getHandler func() http.HandlerFunc, fallback http.HandlerFunc) http.HandlerFunc {
-	if handler == nil {
-		return fallback
-	}
-	return getHandler()
-}
-
-// handleSocialNotAvailable returns error when social features are not configured
-func handleSocialNotAvailable(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"error":   "Social features not available",
-		"message": "Social OAuth features are not configured. Please set ENCRYPTION_KEY and OAuth credentials in environment variables.",
-	})
-}
-
-// handleRoot returns API information
 func handleRoot(container *Container) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		socialEnabled := container.SocialHandler != nil
@@ -220,33 +78,32 @@ func handleRoot(container *Container) http.HandlerFunc {
 			"name":    "SocialQueue API",
 			"version": "2.0.0",
 			"status":  "running",
+			"docs":    "/api/v2/docs",
 			"features": map[string]bool{
 				"authentication": true,
 				"teams":          true,
 				"posts":          true,
 				"social_oauth":   socialEnabled,
-				"rate_limiting":  container.RateLimiter != nil,
-			},
-			"rate_limits": map[string]interface{}{
-				"ip":   "1000 requests per minute",
-				"user": "100 requests per minute",
-				"auth": "10 requests per minute",
+				"analytics":      false, // TODO
+				"billing":        false, // TODO
 			},
 			"endpoints": map[string]string{
-				"health": "/health",
-				"api":    "/api/v2",
-				"auth":   "/api/v2/auth",
-				"teams":  "/api/v2/teams",
-				"posts":  "/api/v2/posts",
-				"social": "/api/v2/social",
+				"health":    "/health",
+				"version":   "/version",
+				"api":       "/api/v2",
+				"auth":      "/api/v2/auth",
+				"users":     "/api/v2/users",
+				"teams":     "/api/v2/teams",
+				"posts":     "/api/v2/posts",
+				"social":    "/api/v2/social",
+				"analytics": "/api/v2/analytics",
+				"billing":   "/api/v2/billing",
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		respondJSON(w, http.StatusOK, response)
 	}
 }
 
-// handleHealth returns health check status
 func handleHealth(container *Container) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check database connection
@@ -257,75 +114,70 @@ func handleHealth(container *Container) http.HandlerFunc {
 			dbError = err.Error()
 		}
 
-		// Check Redis connection
-		redisHealthy := false
+		// Check Redis connection (if available)
+		redisHealthy := true
 		redisError := ""
 		if container.Redis != nil {
 			if err := container.Redis.Ping(r.Context()).Err(); err != nil {
+				redisHealthy = false
 				redisError = err.Error()
-			} else {
-				redisHealthy = true
 			}
 		}
 
-		// Check social features
-		socialEnabled := container.SocialHandler != nil
-		socialAdapterCount := len(container.SocialAdapters)
-
+		// Determine overall status
 		status := "healthy"
 		statusCode := http.StatusOK
-		if !dbHealthy {
-			status = "unhealthy"
-			statusCode = http.StatusServiceUnavailable
+		if !dbHealthy || !redisHealthy {
+			status = "degraded"
+			if !dbHealthy {
+				status = "unhealthy"
+				statusCode = http.StatusServiceUnavailable
+			}
 		}
 
 		response := map[string]interface{}{
-			"status": status,
-			"time":   time.Now().UTC(),
-			"database": map[string]interface{}{
-				"status": dbHealthy,
-				"error":  dbError,
-			},
-			"redis": map[string]interface{}{
-				"status": redisHealthy,
-				"error":  redisError,
+			"status":    status,
+			"timestamp": time.Now().UTC(),
+			"services": map[string]interface{}{
+				"database": map[string]interface{}{
+					"status": dbHealthy,
+					"error":  dbError,
+				},
+				"redis": map[string]interface{}{
+					"status": redisHealthy,
+					"error":  redisError,
+				},
 			},
 			"features": map[string]interface{}{
 				"social_oauth": map[string]interface{}{
-					"enabled":  socialEnabled,
-					"adapters": socialAdapterCount,
-				},
-				"rate_limiting": map[string]interface{}{
-					"enabled": container.RateLimiter != nil,
-					"backend": "redis",
+					"enabled":  container.SocialHandler != nil,
+					"adapters": len(container.SocialAdapters),
 				},
 			},
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(response)
+		respondJSON(w, statusCode, response)
 	}
 }
 
-// handleMe returns current authenticated user info
-func handleMe(w http.ResponseWriter, r *http.Request) {
-	// Get user from context (set by auth middleware)
-	userID, ok := appMiddleware.GetUserID(r.Context())
-	if !ok {
-		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
-		return
+func handleVersion(container *Container) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		response := map[string]interface{}{
+			"version":    "2.0.0",
+			"build_date": "2025-01-13", // TODO: Inject from build
+			"go_version": "1.21+",
+			"env":        container.Config.Environment,
+		}
+		respondJSON(w, http.StatusOK, response)
 	}
+}
 
-	email, _ := appMiddleware.GetUserEmail(r.Context())
-	role, _ := appMiddleware.GetUserRole(r.Context())
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
-	response := map[string]interface{}{
-		"userId": userID.String(),
-		"email":  email,
-		"role":   role,
-	}
-
+func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
 }

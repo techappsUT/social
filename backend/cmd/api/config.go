@@ -1,4 +1,6 @@
-// path: backend/cmd/api/config.go
+// backend/cmd/api/config.go
+// FIXED: Changed default port from 8080 to 8000
+
 package main
 
 import (
@@ -90,10 +92,10 @@ type PlatformConfig struct {
 func LoadConfig() *Config {
 	return &Config{
 		Environment: getEnv("ENVIRONMENT", "development"),
-		BaseURL:     getEnv("BASE_URL", "http://localhost:8080"),
+		BaseURL:     getEnv("BASE_URL", "http://localhost:8000"),
 
 		Server: ServerConfig{
-			Port: getEnv("PORT", "8080"),
+			Port: getEnv("PORT", "8000"), // ✅ FIXED: Changed from 8080 to 8000
 			Host: getEnv("HOST", "0.0.0.0"),
 		},
 
@@ -130,7 +132,7 @@ func LoadConfig() *Config {
 		},
 
 		CORS: CORSConfig{
-			AllowedOrigins: strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8080"), ","),
+			AllowedOrigins: strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000"), ","),
 			AllowedMethods: strings.Split(getEnv("CORS_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS"), ","),
 			AllowedHeaders: strings.Split(getEnv("CORS_HEADERS", "Accept,Authorization,Content-Type,X-Request-ID"), ","),
 		},
@@ -139,17 +141,17 @@ func LoadConfig() *Config {
 			Twitter: PlatformConfig{
 				ClientID:     getEnv("TWITTER_CLIENT_ID", ""),
 				ClientSecret: getEnv("TWITTER_CLIENT_SECRET", ""),
-				CallbackURL:  getEnv("TWITTER_CALLBACK_URL", "http://localhost:8080/api/social/auth/twitter/callback"),
+				CallbackURL:  getEnv("TWITTER_CALLBACK_URL", "http://localhost:8000/api/social/auth/twitter/callback"),
 			},
 			Facebook: PlatformConfig{
 				ClientID:     getEnv("FACEBOOK_CLIENT_ID", ""),
 				ClientSecret: getEnv("FACEBOOK_CLIENT_SECRET", ""),
-				CallbackURL:  getEnv("FACEBOOK_CALLBACK_URL", "http://localhost:8080/api/social/auth/facebook/callback"),
+				CallbackURL:  getEnv("FACEBOOK_CALLBACK_URL", "http://localhost:8000/api/social/auth/facebook/callback"),
 			},
 			LinkedIn: PlatformConfig{
 				ClientID:     getEnv("LINKEDIN_CLIENT_ID", ""),
 				ClientSecret: getEnv("LINKEDIN_CLIENT_SECRET", ""),
-				CallbackURL:  getEnv("LINKEDIN_CALLBACK_URL", "http://localhost:8080/api/social/auth/linkedin/callback"),
+				CallbackURL:  getEnv("LINKEDIN_CALLBACK_URL", "http://localhost:8000/api/social/auth/linkedin/callback"),
 			},
 		},
 	}

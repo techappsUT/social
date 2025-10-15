@@ -42,7 +42,7 @@ class ApiClient {
     }
 
     // Make request
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    const response = await fetch(`${API_URL}/api/v2${endpoint}`, {
       ...fetchOptions,
       headers,
       credentials: 'include', // Include cookies (for refresh token)

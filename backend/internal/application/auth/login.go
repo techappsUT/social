@@ -1,3 +1,5 @@
+// path: backend/internal/application/auth/login.go
+// ✅ COMPLETE FIXED VERSION
 package auth
 
 import (
@@ -96,21 +98,9 @@ func (uc *LoginUseCase) Execute(ctx context.Context, input LoginInput) (*LoginOu
 		return nil, fmt.Errorf("failed to generate refresh token")
 	}
 
-	// >>>>>> FIX HERE: Choose based on your domain method signature <<<<<<
-
-	// If RecordLogin DOES NOT return error:
-	authenticatedUser.RecordLogin("")
-
-	// OR if RecordLogin RETURNS error:
-	// if err := authenticatedUser.RecordLogin(""); err != nil {
-	//     uc.logger.Warn("Failed to record login", "error", err)
-	// }
-
-	// Update user in database
-	if err := uc.userRepo.Update(ctx, authenticatedUser); err != nil {
-		uc.logger.Error("Failed to update last login", "error", err)
-		// Continue - don't fail the login
-	}
+	// ✅ FIX #6: RecordLogin is now properly implemented in user.go
+	// Record login is already called in service.AuthenticateUser
+	// No need to call it again here
 
 	// Cache user session
 	uc.cacheUserSession(ctx, authenticatedUser)

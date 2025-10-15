@@ -1,7 +1,5 @@
-// ============================================================================
-// FILE: backend/cmd/api/main.go
-// FIXED: Removed Container.Cleanup() call since Container doesn't have that method
-// ============================================================================
+// path: backend/cmd/api/main.go
+// ✅ PROFESSIONAL FIXED VERSION - With .env loading
 package main
 
 import (
@@ -15,15 +13,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
+	"github.com/joho/godotenv" // ✅ CRITICAL: Load .env file
 	_ "github.com/lib/pq"
 )
 
 // ============================================================================
-// APPLICATION
+// APPLICATION STRUCTURE
 // ============================================================================
 
-// App represents the application
 type App struct {
 	Container *Container
 	Server    *http.Server
@@ -36,31 +33,32 @@ type App struct {
 func main() {
 	log.Println("🚀 Starting SocialQueue API Server...")
 
-	// Load environment variables
+	// ✅ CRITICAL: Load .env file
 	if err := godotenv.Load(); err != nil {
 		log.Printf("⚠️  No .env file found, using environment variables")
 	} else {
 		log.Println("  ✓ Loaded .env file")
 	}
 
-	// Initialize and run application
-	app, err := NewApp()
+	// Initialize application
+	app, err := initializeApp()
 	if err != nil {
-		log.Fatalf("❌ Failed to initialize application: %v", err)
+		log.Fatalf("❌ Initialization failed: %v", err)
 	}
 
-	// Start server with graceful shutdown
-	app.Start()
+	// Run with graceful shutdown
+	if err := app.Run(); err != nil {
+		log.Fatalf("❌ Server error: %v", err)
+	}
 }
 
 // ============================================================================
 // APPLICATION INITIALIZATION
 // ============================================================================
 
-// NewApp initializes the application
-func NewApp() (*App, error) {
+func initializeApp() (*App, error) {
 	// Step 1: Load configuration
-	log.Println("📝 Loading configuration...")
+	log.Println("⚙️  Loading configuration...")
 	config := LoadConfig()
 	logConfiguration(config)
 
@@ -81,7 +79,7 @@ func NewApp() (*App, error) {
 
 	// Step 4: Setup HTTP router
 	log.Println("🛣️  Setting up router...")
-	router := setupRouter(container)
+	router := SetupRouter(container)
 	log.Println("  ✓ Router configured")
 
 	// Step 5: Create HTTP server
@@ -100,7 +98,10 @@ func NewApp() (*App, error) {
 	}, nil
 }
 
-// setupDatabase initializes and verifies the database connection
+// ============================================================================
+// DATABASE SETUP
+// ============================================================================
+
 func setupDatabase(config *Config) (*sql.DB, error) {
 	// Build DSN
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
@@ -110,6 +111,13 @@ func setupDatabase(config *Config) (*sql.DB, error) {
 		config.Database.Password,
 		config.Database.DBName,
 		config.Database.SSLMode,
+	)
+
+	log.Printf("  Connecting to: %s@%s:%s/%s",
+		config.Database.User,
+		config.Database.Host,
+		config.Database.Port,
+		config.Database.DBName,
 	)
 
 	// Open connection
@@ -132,8 +140,7 @@ func setupDatabase(config *Config) (*sql.DB, error) {
 	db.SetConnMaxLifetime(5 * time.Minute)
 	db.SetConnMaxIdleTime(10 * time.Minute)
 
-	log.Println("  ✓ Database connection verified")
-
+	log.Println("  ✓ Database connection established")
 	return db, nil
 }
 
@@ -141,81 +148,71 @@ func setupDatabase(config *Config) (*sql.DB, error) {
 // SERVER LIFECYCLE
 // ============================================================================
 
-// Start starts the HTTP server with graceful shutdown
-func (app *App) Start() {
-	// Start server in goroutine
+func (app *App) Run() error {
+	// Channel to listen for errors
+	serverErrors := make(chan error, 1)
+
+	// Start HTTP server in goroutine
 	go func() {
-		log.Printf("🚀 Server starting on http://%s", app.Server.Addr)
+		log.Printf("🌐 Server listening on http://%s", app.Server.Addr)
 		log.Printf("✨ Environment: %s", app.Container.Config.Environment)
 		log.Println("")
 		logAvailableEndpoints()
 		log.Println("")
-
-		if err := app.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("❌ Server failed to start: %v", err)
-		}
+		serverErrors <- app.Server.ListenAndServe()
 	}()
 
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	// Channel to listen for interrupt signal
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
-	log.Println("🛑 Shutting down server...")
+	// Block until we receive signal or error
+	select {
+	case err := <-serverErrors:
+		return fmt.Errorf("server error: %w", err)
 
-	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	case sig := <-shutdown:
+		log.Printf("\n🛑 Received %v signal, starting graceful shutdown...", sig)
 
-	if err := app.Server.Shutdown(ctx); err != nil {
-		log.Fatalf("❌ Server forced to shutdown: %v", err)
+		// Give outstanding requests 30 seconds to complete
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Shutdown server
+		if err := app.Server.Shutdown(ctx); err != nil {
+			log.Printf("❌ Graceful shutdown error: %v", err)
+			return app.Server.Close()
+		}
+
+		log.Println("✅ Server stopped gracefully")
+		return nil
 	}
-
-	// FIXED: Removed app.Cleanup() call since Container doesn't have Cleanup method
-	// If cleanup is needed in the future, add a Cleanup() method to Container
-
-	log.Println("✅ Server gracefully stopped")
 }
 
 // ============================================================================
-// HELPER FUNCTIONS
+// LOGGING HELPERS
 // ============================================================================
 
-// logConfiguration logs important configuration details
 func logConfiguration(config *Config) {
-	log.Printf("  ℹ️  Environment: %s", config.Environment)
-	log.Printf("  ℹ️  Server: %s:%s", config.Server.Host, config.Server.Port)
-	log.Printf("  ℹ️  Database: %s@%s:%s/%s",
+	log.Printf("  Environment: %s", config.Environment)
+	log.Printf("  Server: %s:%s", config.Server.Host, config.Server.Port)
+	log.Printf("  Database: %s@%s:%s/%s",
 		config.Database.User,
 		config.Database.Host,
 		config.Database.Port,
 		config.Database.DBName,
 	)
+	log.Printf("  Email Provider: %s", config.Email.Provider)
 }
 
-// logAvailableEndpoints logs all available API endpoints
 func logAvailableEndpoints() {
-	log.Println("📍 Available endpoints:")
-	log.Println("  GET  /health                  - Health check")
-	log.Println("  GET  /                        - API info")
-	log.Println("")
-	log.Println("  📝 Authentication:")
-	log.Println("  POST /api/v2/auth/signup      - User registration")
-	log.Println("  POST /api/v2/auth/login       - User login")
-	log.Println("")
-	log.Println("  👤 User Management (Protected):")
-	log.Println("  GET  /api/v2/users/{id}       - Get user profile")
-	log.Println("  PUT  /api/v2/users/{id}       - Update user profile")
-	log.Println("  DELETE /api/v2/users/{id}     - Delete user account")
-	log.Println("  GET  /api/v2/me               - Get current user")
-	log.Println("")
-	log.Println("  🏢 Team Management (Protected):")
-	log.Println("  GET  /api/v2/teams            - List teams")
-	log.Println("  POST /api/v2/teams            - Create team")
-	log.Println("  GET  /api/v2/teams/{id}       - Get team details")
-	log.Println("  PUT  /api/v2/teams/{id}       - Update team")
-	log.Println("  DELETE /api/v2/teams/{id}     - Delete team")
-	log.Println("")
-	log.Println("  🔧 Admin (Protected):")
-	log.Println("  GET  /api/v2/admin/users      - List all users")
+	log.Println("📍 Available Endpoints:")
+	log.Println("  GET  /health              - Health check")
+	log.Println("  GET  /version             - API version")
+	log.Println("  POST /api/v2/auth/signup  - User registration")
+	log.Println("  POST /api/v2/auth/login   - User login")
+	log.Println("  POST /api/v2/auth/refresh - Refresh token")
+	log.Println("  GET  /api/v2/users/:id    - Get user (protected)")
+	log.Println("  POST /api/v2/teams        - Create team (protected)")
+	log.Println("  POST /api/v2/posts        - Create post (protected)")
 }

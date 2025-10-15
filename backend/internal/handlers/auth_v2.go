@@ -1,4 +1,5 @@
 // path: backend/internal/handlers/auth_v2.go
+// ✅ UPDATED - Use shared response helpers
 package handlers
 
 import (
@@ -16,61 +17,44 @@ import (
 type AuthHandlerV2 struct {
 	createUserUC *user.CreateUserUseCase
 	loginUC      *auth.LoginUseCase
-	updateUserUC *user.UpdateUserUseCase // 🆕 NEW
-	getUserUC    *user.GetUserUseCase    // 🆕 NEW
-	deleteUserUC *user.DeleteUserUseCase // 🆕 NEW
+	updateUserUC *user.UpdateUserUseCase
+	getUserUC    *user.GetUserUseCase
+	deleteUserUC *user.DeleteUserUseCase
 }
 
 // NewAuthHandlerV2 creates a new auth handler with use cases
 func NewAuthHandlerV2(
 	createUserUC *user.CreateUserUseCase,
 	loginUC *auth.LoginUseCase,
-	updateUserUC *user.UpdateUserUseCase, // 🆕 NEW
-	getUserUC *user.GetUserUseCase, // 🆕 NEW
-	deleteUserUC *user.DeleteUserUseCase, // 🆕 NEW
+	updateUserUC *user.UpdateUserUseCase,
+	getUserUC *user.GetUserUseCase,
+	deleteUserUC *user.DeleteUserUseCase,
 ) *AuthHandlerV2 {
 	return &AuthHandlerV2{
 		createUserUC: createUserUC,
 		loginUC:      loginUC,
-		updateUserUC: updateUserUC, // 🆕 NEW
-		getUserUC:    getUserUC,    // 🆕 NEW
-		deleteUserUC: deleteUserUC, // 🆕 NEW
+		updateUserUC: updateUserUC,
+		getUserUC:    getUserUC,
+		deleteUserUC: deleteUserUC,
 	}
 }
 
-// RegisterRoutes registers all auth routes
-func (h *AuthHandlerV2) RegisterRoutes(r chi.Router) {
-	// Public routes
-	r.Post("/auth/signup", h.Signup)
-	r.Post("/auth/login", h.Login)
-
-	// Protected routes (require authentication)
-	r.Group(func(r chi.Router) {
-		// Add auth middleware here if not already applied globally
-
-		// 🆕 NEW: User management endpoints
-		r.Get("/users/{id}", h.GetUser)       // Get user by ID
-		r.Put("/users/{id}", h.UpdateUser)    // Update user profile
-		r.Delete("/users/{id}", h.DeleteUser) // Delete user account
-	})
-}
-
 // ============================================================================
-// EXISTING HANDLERS (Keep these)
+// AUTHENTICATION HANDLERS
 // ============================================================================
 
 // Signup handles user registration
 func (h *AuthHandlerV2) Signup(w http.ResponseWriter, r *http.Request) {
 	var input user.CreateUserInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid request body")
+		respondError(w, http.StatusBadRequest, "Invalid request body") // ✅ Use shared helper
 		return
 	}
 
 	output, err := h.createUserUC.Execute(r.Context(), input)
 	if err != nil {
 		status := h.mapErrorToHTTPStatus(err)
-		h.respondError(w, status, err.Error())
+		respondError(w, status, err.Error()) // ✅ Use shared helper
 		return
 	}
 
@@ -88,21 +72,21 @@ func (h *AuthHandlerV2) Signup(w http.ResponseWriter, r *http.Request) {
 	// Don't send refresh token in response body
 	output.RefreshToken = ""
 
-	h.respondJSON(w, http.StatusCreated, output)
+	respondCreated(w, output) // ✅ Use shared helper
 }
 
 // Login handles user authentication
 func (h *AuthHandlerV2) Login(w http.ResponseWriter, r *http.Request) {
 	var input auth.LoginInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid request body")
+		respondError(w, http.StatusBadRequest, "Invalid request body") // ✅ Use shared helper
 		return
 	}
 
 	output, err := h.loginUC.Execute(r.Context(), input)
 	if err != nil {
 		// Always return 401 for login failures (security)
-		h.respondError(w, http.StatusUnauthorized, "Invalid credentials")
+		respondError(w, http.StatusUnauthorized, "Invalid credentials") // ✅ Use shared helper
 		return
 	}
 
@@ -111,7 +95,7 @@ func (h *AuthHandlerV2) Login(w http.ResponseWriter, r *http.Request) {
 		Name:     "refresh_token",
 		Value:    output.RefreshToken,
 		HttpOnly: true,
-		Secure:   false, // Set to true in production
+		Secure:   false,
 		SameSite: http.SameSiteStrictMode,
 		Path:     "/",
 		MaxAge:   30 * 24 * 60 * 60, // 30 days
@@ -120,132 +104,113 @@ func (h *AuthHandlerV2) Login(w http.ResponseWriter, r *http.Request) {
 	// Don't send refresh token in response body
 	output.RefreshToken = ""
 
-	h.respondJSON(w, http.StatusOK, output)
+	respondSuccess(w, output) // ✅ Use shared helper
 }
 
 // ============================================================================
-// 🆕 NEW HANDLERS
+// USER MANAGEMENT HANDLERS
 // ============================================================================
 
 // GetUser retrieves a user by ID
 func (h *AuthHandlerV2) GetUser(w http.ResponseWriter, r *http.Request) {
-	// Extract user ID from URL
 	userIDStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid user ID")
+		respondError(w, http.StatusBadRequest, "Invalid user ID") // ✅ Use shared helper
 		return
 	}
 
-	// Check authorization: users can only get their own profile (or admin can get any)
+	// Check authorization
 	requestUserID, ok := middleware.GetUserID(r.Context())
 	if !ok {
-		h.respondError(w, http.StatusUnauthorized, "Unauthorized")
+		respondError(w, http.StatusUnauthorized, "Unauthorized") // ✅ Use shared helper
 		return
 	}
 
-	// Allow if requesting own profile
 	if requestUserID != userID {
-		// Check if user is admin
 		role, _ := middleware.GetUserRole(r.Context())
 		if role != "admin" && role != "owner" {
-			h.respondError(w, http.StatusForbidden, "Forbidden")
+			respondError(w, http.StatusForbidden, "Forbidden") // ✅ Use shared helper
 			return
 		}
 	}
 
-	// Execute use case
 	input := user.GetUserInput{UserID: userID}
 	output, err := h.getUserUC.Execute(r.Context(), input)
 	if err != nil {
 		status := h.mapErrorToHTTPStatus(err)
-		h.respondError(w, status, err.Error())
+		respondError(w, status, err.Error()) // ✅ Use shared helper
 		return
 	}
 
-	h.respondJSON(w, http.StatusOK, output)
+	respondSuccess(w, output) // ✅ Use shared helper
 }
 
-// UpdateUser updates a user's profile
+// UpdateUser updates user information
 func (h *AuthHandlerV2) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	// Extract user ID from URL
 	userIDStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid user ID")
+		respondError(w, http.StatusBadRequest, "Invalid user ID") // ✅ Use shared helper
 		return
 	}
 
-	// Check authorization: users can only update their own profile
 	requestUserID, ok := middleware.GetUserID(r.Context())
 	if !ok {
-		h.respondError(w, http.StatusUnauthorized, "Unauthorized")
+		respondError(w, http.StatusUnauthorized, "Unauthorized") // ✅ Use shared helper
 		return
 	}
 
 	if requestUserID != userID {
-		// Check if user is admin
-		role, _ := middleware.GetUserRole(r.Context())
-		if role != "admin" && role != "owner" {
-			h.respondError(w, http.StatusForbidden, "Forbidden")
-			return
-		}
-	}
-
-	// Parse request body
-	var input user.UpdateUserInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid request body")
+		respondError(w, http.StatusForbidden, "Forbidden") // ✅ Use shared helper
 		return
 	}
 
-	// Set user ID from URL
-	input.UserID = userID
+	var input user.UpdateUserInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body") // ✅ Use shared helper
+		return
+	}
 
-	// Execute use case
+	input.UserID = userID
 	output, err := h.updateUserUC.Execute(r.Context(), input)
 	if err != nil {
 		status := h.mapErrorToHTTPStatus(err)
-		h.respondError(w, status, err.Error())
+		respondError(w, status, err.Error()) // ✅ Use shared helper
 		return
 	}
 
-	h.respondJSON(w, http.StatusOK, output)
+	respondSuccess(w, output) // ✅ Use shared helper
 }
 
-// DeleteUser soft-deletes a user account
+// DeleteUser soft deletes a user account
 func (h *AuthHandlerV2) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	// Extract user ID from URL
 	userIDStr := chi.URLParam(r, "id")
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid user ID")
+		respondError(w, http.StatusBadRequest, "Invalid user ID") // ✅ Use shared helper
 		return
 	}
 
-	// Check authorization: users can only delete their own account
 	requestUserID, ok := middleware.GetUserID(r.Context())
 	if !ok {
-		h.respondError(w, http.StatusUnauthorized, "Unauthorized")
+		respondError(w, http.StatusUnauthorized, "Unauthorized") // ✅ Use shared helper
 		return
 	}
 
 	if requestUserID != userID {
-		// Check if user is admin
 		role, _ := middleware.GetUserRole(r.Context())
 		if role != "admin" && role != "owner" {
-			h.respondError(w, http.StatusForbidden, "Forbidden")
+			respondError(w, http.StatusForbidden, "Forbidden") // ✅ Use shared helper
 			return
 		}
 	}
 
-	// Parse optional request body for reason
 	var reqBody struct {
 		Reason string `json:"reason"`
 	}
 	json.NewDecoder(r.Body).Decode(&reqBody)
 
-	// Execute use case
 	input := user.DeleteUserInput{
 		UserID: userID,
 		Reason: reqBody.Reason,
@@ -253,29 +218,20 @@ func (h *AuthHandlerV2) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	output, err := h.deleteUserUC.Execute(r.Context(), input)
 	if err != nil {
 		status := h.mapErrorToHTTPStatus(err)
-		h.respondError(w, status, err.Error())
+		respondError(w, status, err.Error()) // ✅ Use shared helper
 		return
 	}
 
-	h.respondJSON(w, http.StatusOK, output)
+	respondSuccess(w, output) // ✅ Use shared helper
 }
 
 // ============================================================================
 // HELPER METHODS
 // ============================================================================
 
-func (h *AuthHandlerV2) respondJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
-}
-
-func (h *AuthHandlerV2) respondError(w http.ResponseWriter, status int, message string) {
-	h.respondJSON(w, status, map[string]string{"error": message})
-}
+// ✅ REMOVED: Duplicate respondJSON and respondError (use shared helpers)
 
 func (h *AuthHandlerV2) mapErrorToHTTPStatus(err error) int {
-	// Map domain errors to HTTP status codes
 	errMsg := err.Error()
 
 	switch {

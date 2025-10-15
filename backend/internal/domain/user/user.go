@@ -1,6 +1,5 @@
 // path: backend/internal/domain/user/user.go
-// 🆕 NEW - Clean Architecture
-
+// ✅ COMPLETE WORKING VERSION - All methods in one file
 package user
 
 import (
@@ -12,6 +11,10 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// ============================================================================
+// USER ENTITY
+// ============================================================================
 
 // User represents the core user entity in the domain layer.
 // This is a pure domain object with no external dependencies.
@@ -32,6 +35,10 @@ type User struct {
 	deletedAt     *time.Time
 }
 
+// ============================================================================
+// ENUMS
+// ============================================================================
+
 // Role represents the user's role in the system
 type Role string
 
@@ -50,6 +57,22 @@ const (
 	StatusSuspended Status = "suspended"
 	StatusPending   Status = "pending"
 )
+
+// ============================================================================
+// STATISTICS TYPE
+// ============================================================================
+
+// Statistics holds user statistics
+type Statistics struct {
+	TotalUsers       int64 `json:"totalUsers"`
+	ActiveUsers      int64 `json:"activeUsers"`
+	VerifiedUsers    int64 `json:"verifiedUsers"`
+	NewUsersThisWeek int64 `json:"newUsersThisWeek"`
+}
+
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
 
 // NewUser creates a new user entity with validation
 func NewUser(email, username, password, firstName, lastName string) (*User, error) {
@@ -92,7 +115,7 @@ func NewUser(email, username, password, firstName, lastName string) (*User, erro
 		firstName:     strings.TrimSpace(firstName),
 		lastName:      strings.TrimSpace(lastName),
 		role:          RoleUser,
-		status:        StatusPending,
+		status:        StatusActive, // ✅ Changed from StatusPending
 		emailVerified: false,
 		createdAt:     now,
 		updatedAt:     now,
@@ -100,7 +123,6 @@ func NewUser(email, username, password, firstName, lastName string) (*User, erro
 }
 
 // Reconstruct recreates a user entity from persistence layer
-// This is used when loading from database
 func Reconstruct(
 	id uuid.UUID,
 	email string,
@@ -135,7 +157,9 @@ func Reconstruct(
 	}
 }
 
-// Getters - Encapsulation of internal state
+// ============================================================================
+// GETTERS
+// ============================================================================
 
 func (u *User) ID() uuid.UUID           { return u.id }
 func (u *User) Email() string           { return u.email }
@@ -152,9 +176,21 @@ func (u *User) CreatedAt() time.Time    { return u.createdAt }
 func (u *User) UpdatedAt() time.Time    { return u.updatedAt }
 func (u *User) DeletedAt() *time.Time   { return u.deletedAt }
 
-// func (u *User) PasswordHash() string    { return u.passwordHash }
+// PasswordHash returns the password hash (needed by repository)
+func (u *User) PasswordHash() string { return u.passwordHash }
 
-// Business Logic Methods
+// ============================================================================
+// SETTERS (Limited - used by repository)
+// ============================================================================
+
+// SetID sets the user ID (used by repository after creation)
+func (u *User) SetID(id uuid.UUID) {
+	u.id = id
+}
+
+// ============================================================================
+// BUSINESS LOGIC METHODS
+// ============================================================================
 
 // VerifyPassword checks if the provided password matches
 func (u *User) VerifyPassword(password string) bool {
@@ -186,7 +222,6 @@ func (u *User) ChangePassword(oldPassword, newPassword string) error {
 }
 
 // ResetPassword sets a new password without checking the old one
-// Used for password reset flows
 func (u *User) ResetPassword(newPassword string) error {
 	// Validate new password
 	if err := validatePassword(newPassword); err != nil {
@@ -245,11 +280,20 @@ func (u *User) VerifyEmail() error {
 }
 
 // RecordLogin updates the last login timestamp
-// func (u *User) RecordLogin() {
-// 	now := time.Now().UTC()
-// 	u.lastLoginAt = &now
-// 	u.updatedAt = now
-// }
+func (u *User) RecordLogin(ipAddress string) error {
+	if u.status == StatusSuspended {
+		return ErrAccountSuspended
+	}
+
+	now := time.Now().UTC()
+	u.lastLoginAt = &now
+	u.updatedAt = now
+
+	// Note: ipAddress parameter for future use (audit logging)
+	// You can add u.lastLoginIP = ipAddress if you add the field
+
+	return nil
+}
 
 // Suspend suspends the user account
 func (u *User) Suspend() error {
@@ -309,7 +353,9 @@ func (u *User) ChangeRole(newRole Role) error {
 	return nil
 }
 
-// Domain Rules and Permissions
+// ============================================================================
+// DOMAIN RULES AND PERMISSIONS
+// ============================================================================
 
 // CanManageTeam checks if the user can manage team settings
 func (u *User) CanManageTeam() bool {
@@ -320,6 +366,18 @@ func (u *User) CanManageTeam() bool {
 
 // CanAccessPlatform checks if the user can access the platform
 func (u *User) CanAccessPlatform() bool {
+	return u.status == StatusActive &&
+		u.deletedAt == nil
+	// Note: emailVerified removed - users can login before verification
+}
+
+// RequiresEmailVerification checks if user needs to verify email
+func (u *User) RequiresEmailVerification() bool {
+	return !u.emailVerified
+}
+
+// CanAccessRestrictedFeatures checks if user can access premium features
+func (u *User) CanAccessRestrictedFeatures() bool {
 	return u.status == StatusActive &&
 		u.emailVerified &&
 		u.deletedAt == nil
@@ -340,7 +398,23 @@ func (u *User) IsOwner() bool {
 	return u.role == RoleOwner
 }
 
-// Helper Functions
+// IsDeleted checks if the user has been soft-deleted
+func (u *User) IsDeleted() bool {
+	return u.deletedAt != nil
+}
+
+// EmailVerifiedAt returns the verification timestamp
+func (u *User) EmailVerifiedAt() *time.Time {
+	if u.emailVerified {
+		// If email is verified but no timestamp exists, return created timestamp
+		return &u.createdAt
+	}
+	return nil
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 func validateEmail(email string) error {
 	if strings.TrimSpace(email) == "" {
@@ -389,8 +463,6 @@ func validatePassword(password string) error {
 		return ErrPasswordTooLong
 	}
 
-	// Could add more complex validation here (uppercase, lowercase, special chars, etc.)
-
 	return nil
 }
 
@@ -416,31 +488,3 @@ func isValidRole(role Role) bool {
 		return false
 	}
 }
-
-// Additional getters for auth module
-func (u *User) EmailVerifiedAt() *time.Time {
-	if u.emailVerified {
-		// If email is verified but no timestamp exists, return created timestamp
-		return &u.createdAt
-	}
-	return nil
-}
-
-// func (u *User) PasswordHash() string {
-//     return u.passwordHash
-// }
-
-// IsDeleted checks if the user has been soft-deleted
-func (u *User) IsDeleted() bool {
-	return u.deletedAt != nil
-}
-
-// SetID sets the user ID (used by repository after creation)
-// func (u *User) SetID(id uuid.UUID) {
-// 	u.id = id
-// }
-
-// // PasswordHash returns the password hash
-// func (u *User) PasswordHash() string {
-// 	return u.passwordHash
-// }

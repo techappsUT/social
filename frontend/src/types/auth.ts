@@ -10,7 +10,8 @@
 // ============================================================================
 
 export interface LoginCredentials {
-  email: string;
+  // email: string;
+  identifier: string;  // ← CHANGED to allow email or username
   password: string;
 }
 
@@ -19,6 +20,7 @@ export interface SignupCredentials {
   password: string;
   firstName: string;
   lastName: string;
+  username: string;      // ← ADD THIS
 }
 
 export interface VerifyEmailRequest {

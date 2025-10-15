@@ -27,6 +27,15 @@ const signupSchema = z
   .object({
     firstName: z.string().min(1, 'First name is required'),
     lastName: z.string().min(1, 'Last name is required'),
+    username: z                                          // ← ADD THIS
+      .string()
+      .min(3, 'Username must be at least 3 characters')
+      .max(30, 'Username must be at most 30 characters')
+      .regex(
+        /^[a-zA-Z0-9_-]+$/,
+        'Username can only contain letters, numbers, underscores, and dashes'
+      )
+      .transform(val => val.toLowerCase()), // Backend stores lowercase
     email: z.string().email('Invalid email address'),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     confirmPassword: z.string(),
@@ -158,6 +167,27 @@ export default function SignupPage() {
                   <p className="text-xs text-red-600">{errors.lastName.message}</p>
                 )}
               </div>
+            </div>
+
+
+            {/* Username field - ADD THIS */}
+            <div className="space-y-2">
+              <Label htmlFor="username">Username</Label>
+              <Input
+                id="username"
+                type="text"
+                placeholder="johndoe"
+                autoComplete="username"
+                {...register('username')}
+                disabled={isPending}
+                className={errors.username ? 'border-red-500' : ''}
+              />
+              {errors.username && (
+                <p className="text-xs text-red-600">{errors.username.message}</p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                3-30 characters, letters, numbers, underscore and dash only
+              </p>
             </div>
 
             {/* Email field */}

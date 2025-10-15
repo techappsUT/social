@@ -27,7 +27,8 @@ import { toast } from 'sonner';
 
 // Validation schema - aligned with backend
 const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  // email: z.string().email('Invalid email address'),
+  identifier: z.string().min(1, 'Email or username is required'),  // ← CHANGED
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
@@ -35,7 +36,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const searchParams = useSearchParams();
-  const { mutate: login, isPending, error } = useLogin();
+  const { mutate: login, isPending, error, isError } = useLogin();
 
   const {
     register,
@@ -83,6 +84,15 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
 
+          {isError && error && (
+      <Alert variant="destructive" className="mb-4">
+        <AlertDescription>
+          {error.message || 'Login failed. Please check your credentials and try again.'}
+        </AlertDescription>
+      </Alert>
+    )}
+
+
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-6">
             {/* Success alerts */}
@@ -96,16 +106,16 @@ export default function LoginPage() {
             )}
 
             {/* Error message */}
-            {error && (
+            {/* {error && (
               <Alert variant="destructive">
                 <AlertDescription>
                   {error.message || 'Invalid email or password. Please try again.'}
                 </AlertDescription>
               </Alert>
-            )}
+            )} */}
 
             {/* Email field */}
-            <div className="space-y-2">
+            {/* <div className="space-y-2">
               <Label htmlFor="email" className="text-sm font-medium">
                 Email
               </Label>
@@ -121,8 +131,24 @@ export default function LoginPage() {
               {errors.email && (
                 <p className="text-sm text-red-600 dark:text-red-400">{errors.email.message}</p>
               )}
-            </div>
+            </div> */}
 
+            {/* Email/Username field - UPDATED */}
+            <div className="space-y-2">
+              <Label htmlFor="identifier">Email or Username</Label>
+              <Input
+                id="identifier"
+                type="text"
+                placeholder="you@example.com or username"
+                autoComplete="username"
+                {...register('identifier')}
+                disabled={isPending}
+                className={errors.identifier ? 'border-red-500' : ''}
+              />
+              {errors.identifier && (
+                <p className="text-xs text-red-600">{errors.identifier.message}</p>
+              )}
+            </div>
             {/* Password field */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">

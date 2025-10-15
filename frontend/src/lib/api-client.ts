@@ -69,65 +69,65 @@ class ApiClient {
   /**
    * Handle 401 by refreshing token and retrying request
    */
-  private async handleUnauthorized<T>(
-    endpoint: string,
-    options: RequestOptions
-  ): Promise<T> {
-    // If already refreshing, queue this request
-    if (this.isRefreshing) {
-      return new Promise((resolve, reject) => {
-        this.refreshQueue.push(async () => {
-          try {
-            const result = await this.request<T>(endpoint, {
-              ...options,
-              skipRefresh: true,
-            });
-            resolve(result);
-          } catch (error) {
-            reject(error);
-          }
-        });
+ private async handleUnauthorized<T>(
+  endpoint: string,
+  options: RequestOptions
+): Promise<T> {
+  // If already refreshing, queue this request
+  if (this.isRefreshing) {
+    return new Promise((resolve, reject) => {
+      this.refreshQueue.push(async () => {
+        try {
+          const result = await this.request<T>(endpoint, {
+            ...options,
+            skipRefresh: true,
+          });
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
       });
-    }
-
-    // Start refresh process
-    this.isRefreshing = true;
-
-    try {
-      // Attempt to refresh token
-      const refreshResponse = await fetch(`${API_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Refresh token is in cookie
-      });
-
-      if (!refreshResponse.ok) {
-        throw new Error('Token refresh failed');
-      }
-
-      const authData: AuthResponse = await refreshResponse.json();
-
-      // Store new access token
-      this.setAccessToken(authData.accessToken);
-
-      // Process queued requests
-      this.refreshQueue.forEach((callback) => callback());
-      this.refreshQueue = [];
-
-      // Retry original request
-      return await this.request<T>(endpoint, {
-        ...options,
-        skipRefresh: true,
-      });
-    } catch (error) {
-      // Refresh failed - clear auth and redirect to login
-      this.clearAuth();
-      window.location.href = '/login';
-      throw error;
-    } finally {
-      this.isRefreshing = false;
-    }
+    });
   }
+
+  // Start refresh process
+  this.isRefreshing = true;
+
+  try {
+    // Attempt to refresh token - ✅ FIXED URL
+    const refreshResponse = await fetch(`${API_URL}/api/v2/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // Refresh token is in cookie
+    });
+
+    if (!refreshResponse.ok) {
+      throw new Error('Token refresh failed');
+    }
+
+    const authData: AuthResponse = await refreshResponse.json();
+
+    // Store new access token
+    this.setAccessToken(authData.accessToken);
+
+    // Process queued requests
+    this.refreshQueue.forEach((callback) => callback());
+    this.refreshQueue = [];
+
+    // Retry original request
+    return await this.request<T>(endpoint, {
+      ...options,
+      skipRefresh: true,
+    });
+  } catch (error) {
+    // Refresh failed - clear auth and redirect to login
+    this.clearAuth();
+    window.location.href = '/login';
+    throw error;
+  } finally {
+    this.isRefreshing = false;
+  }
+}
 
   /**
    * Token management

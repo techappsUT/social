@@ -50,6 +50,7 @@ type Container struct {
 	Logger            common.Logger
 	WorkerQueue       *services.WorkerQueueService
 	EncryptionService *services.EncryptionService
+	Queries           *db.Queries // ← ADD THIS LINE
 
 	// Repositories
 	UserRepo   userDomain.Repository
@@ -262,21 +263,22 @@ func (c *Container) initializeInfrastructure() error {
 	// ========================================================================
 	// SQLC QUERIES - Initialize BEFORE repositories
 	// ========================================================================
-	queries := db.New(c.DB)
+	// queries := db.New(c.DB)
+	c.Queries = db.New(c.DB) // ← CHANGE FROM: queries := db.New(c.DB)
 	c.Logger.Info("✅ SQLC queries initialized")
 
 	// ========================================================================
 	// REPOSITORIES
 	// ========================================================================
 	// ✅ FIX: Pass both c.DB and queries to NewUserRepository
-	c.UserRepo = persistence.NewUserRepository(c.DB, queries)
+	c.UserRepo = persistence.NewUserRepository(c.DB, c.Queries)
 	c.TeamRepo = persistence.NewTeamRepository(c.DB)
 	c.MemberRepo = persistence.NewTeamMemberRepository(c.DB)
-	c.PostRepo = persistence.NewPostRepository(c.DB, queries)
+	c.PostRepo = persistence.NewPostRepository(c.DB, c.Queries)
 
 	// Social Repository (requires encryption service)
 	if c.EncryptionService != nil {
-		c.SocialRepo = persistence.NewSocialRepository(queries, c.EncryptionService)
+		c.SocialRepo = persistence.NewSocialRepository(c.Queries, c.EncryptionService)
 		c.Logger.Info("Social repository initialized successfully")
 	} else {
 		c.Logger.Warn("Social repository not initialized - encryption service unavailable")
@@ -376,45 +378,52 @@ func (c *Container) initializeUseCases() error {
 	// For now, setting them to nil to allow compilation
 
 	// Uncomment these when the use cases are implemented:
-	/*
-		c.RefreshTokenUC = auth.NewRefreshTokenUseCase(
-			c.UserRepo,
-			c.TokenService,
-			c.Logger,
-		)
 
-		c.LogoutUC = auth.NewLogoutUseCase(
-			c.TokenService,
-			c.Logger,
-		)
+	c.RefreshTokenUC = auth.NewRefreshTokenUseCase(
+		c.UserRepo,
+		c.TokenService,
+		c.CacheService, // ← CRITICAL: This was missing!
+		c.Logger,
+	)
 
-		c.VerifyEmailUC = auth.NewVerifyEmailUseCase(
-			c.UserRepo,
-			c.Logger,
-		)
+	c.LogoutUC = auth.NewLogoutUseCase(
+		c.TokenService,
+		c.Logger,
+	)
 
-		c.ResendVerificationUC = auth.NewResendVerificationUseCase(
-			c.UserRepo,
-			c.EmailService,
-			c.Logger,
-		)
+	c.VerifyEmailUC = auth.NewVerifyEmailUseCase(
+		c.UserRepo,
+		c.Queries, // ← Add this
+		c.Logger,
+	)
 
-		c.ForgotPasswordUC = auth.NewForgotPasswordUseCase(
-			c.UserRepo,
-			c.EmailService,
-			c.Logger,
-		)
+	c.ResendVerificationUC = auth.NewResendVerificationUseCase(
+		c.UserRepo,
+		c.Queries, // ← Add this
+		c.EmailService,
+		c.Logger,
+	)
 
-		c.ResetPasswordUC = auth.NewResetPasswordUseCase(
-			c.UserRepo,
-			c.Logger,
-		)
+	c.ForgotPasswordUC = auth.NewForgotPasswordUseCase(
+		c.UserRepo,
+		c.Queries, // ← Add this
+		c.EmailService,
+		c.Logger,
+	)
 
-		c.ChangePasswordUC = auth.NewChangePasswordUseCase(
-			c.UserRepo,
-			c.Logger,
-		)
-	*/
+	c.ResetPasswordUC = auth.NewResetPasswordUseCase(
+		c.UserRepo,
+		c.Queries,      // ← Add this
+		c.UserService,  // ← Add this
+		c.EmailService, // ← Add this
+		c.Logger,
+	)
+
+	c.ChangePasswordUC = auth.NewChangePasswordUseCase(
+		c.UserRepo,
+		c.UserService, // ← Add this
+		c.Logger,
+	)
 
 	// ========================================================================
 	// USER USE CASES

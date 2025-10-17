@@ -1,9 +1,9 @@
-// path: backend/internal/handlers/auth_handler.go
 package handlers
 
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -29,6 +29,10 @@ type AuthHandler struct {
 	forgotPasswordUC     *auth.ForgotPasswordUseCase
 	resetPasswordUC      *auth.ResetPasswordUseCase
 	changePasswordUC     *auth.ChangePasswordUseCase
+
+	// Dev mode support
+	devMode bool
+	devCode string
 }
 
 // NewAuthHandler creates a new auth handler
@@ -59,6 +63,8 @@ func NewAuthHandler(
 		forgotPasswordUC:     forgotPasswordUC,
 		resetPasswordUC:      resetPasswordUC,
 		changePasswordUC:     changePasswordUC,
+		devMode:              os.Getenv("DEVELOPMENT_MODE") == "true",
+		devCode:              os.Getenv("DEV_EMAIL_VERIFICATION_CODE"),
 	}
 }
 
@@ -76,7 +82,11 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 
 	output, err := h.createUserUC.Execute(r.Context(), input)
 	if err != nil {
-		status := mapErrorToStatus(err)
+		// Simple error mapping for now
+		status := http.StatusBadRequest
+		if err.Error() == "email already exists" {
+			status = http.StatusConflict
+		}
 		respondError(w, status, err.Error())
 		return
 	}
@@ -106,6 +116,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Execute without fingerprint (not in your current implementation)
 	output, err := h.loginUC.Execute(r.Context(), input)
 	if err != nil {
 		respondError(w, http.StatusUnauthorized, "Invalid credentials")
@@ -125,6 +136,54 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Don't send refresh token in response body
 	output.RefreshToken = ""
+
+	respondSuccess(w, output)
+}
+
+// GetUser handles GET /api/v2/me (current user)
+func (h *AuthHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+
+	// Create GetUserInput with the UUID
+	input := user.GetUserInput{
+		UserID: userID,
+	}
+
+	user, err := h.getUserUC.Execute(r.Context(), input)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	respondSuccess(w, user)
+}
+
+// VerifyEmail handles POST /api/v2/auth/verify-email
+func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var input auth.VerifyEmailInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// In dev mode, accept the dev code as valid
+	if h.devMode && h.devCode != "" && input.Token == h.devCode {
+		respondSuccess(w, map[string]interface{}{
+			"success": true,
+			"message": "Email verified successfully (dev mode)",
+		})
+		return
+	}
+
+	output, err := h.verifyEmailUC.Execute(r.Context(), input)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	respondSuccess(w, output)
 }
@@ -171,62 +230,6 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	// Don't send refresh token in response body
 	output.RefreshToken = ""
-
-	respondSuccess(w, output)
-}
-
-// Logout handles POST /api/v2/auth/logout
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	// Get refresh token from cookie
-	var refreshToken string
-	cookie, err := r.Cookie("refresh_token")
-	if err == nil {
-		refreshToken = cookie.Value
-	}
-
-	// Execute logout use case - only needs RefreshToken
-	if refreshToken != "" {
-		input := auth.LogoutInput{
-			RefreshToken: refreshToken,
-		}
-
-		_, err = h.logoutUC.Execute(r.Context(), input)
-		if err != nil {
-			// Don't fail logout - still clear cookies
-			// Just log the error if you have a logger
-		}
-	}
-
-	// Clear refresh token cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
-		Path:     "/",
-		MaxAge:   -1, // Delete cookie
-	})
-
-	respondSuccess(w, map[string]interface{}{
-		"success": true,
-		"message": "Logged out successfully",
-	})
-}
-
-// VerifyEmail handles POST /api/v2/auth/verify-email
-func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
-	var input auth.VerifyEmailInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	output, err := h.verifyEmailUC.Execute(r.Context(), input)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 
 	respondSuccess(w, output)
 }
@@ -296,7 +299,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ FIX: Set UserID as uuid.UUID directly (not string)
+	// Set UserID as uuid.UUID directly
 	input.UserID = userID
 
 	output, err := h.changePasswordUC.Execute(r.Context(), input)
@@ -308,44 +311,49 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	respondSuccess(w, output)
 }
 
-// ============================================================================
-// USER MANAGEMENT ROUTES (authenticated)
-// ============================================================================
-
-// GetUser handles GET /api/v2/users/{id}
-func (h *AuthHandler) GetUser(w http.ResponseWriter, r *http.Request) {
-	userIDStr := chi.URLParam(r, "id")
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid user ID")
-		return
+// Logout handles POST /api/v2/auth/logout
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	// Get refresh token from cookie
+	var refreshToken string
+	cookie, err := r.Cookie("refresh_token")
+	if err == nil {
+		refreshToken = cookie.Value
 	}
 
-	requestUserID, ok := middleware.GetUserID(r.Context())
-	if !ok {
-		respondError(w, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
+	// Execute logout use case - only needs RefreshToken
+	if refreshToken != "" {
+		input := auth.LogoutInput{
+			RefreshToken: refreshToken,
+		}
 
-	// Allow if requesting own profile or if admin
-	if requestUserID != userID {
-		role, _ := middleware.GetUserRole(r.Context())
-		if role != "admin" && role != "owner" {
-			respondError(w, http.StatusForbidden, "Forbidden")
-			return
+		_, err = h.logoutUC.Execute(r.Context(), input)
+		if err != nil {
+			// Don't fail logout - still clear cookies
+			// Just log the error if you have a logger
 		}
 	}
 
-	input := user.GetUserInput{UserID: userID}
-	output, err := h.getUserUC.Execute(r.Context(), input)
-	if err != nil {
-		status := mapErrorToStatus(err)
-		respondError(w, status, err.Error())
-		return
-	}
+	// Clear refresh token cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   -1, // Delete cookie
+	})
 
-	respondSuccess(w, output)
+	respondSuccess(w, map[string]interface{}{
+		"success": true,
+		"message": "Logged out successfully",
+	})
 }
+
+// REMOVED duplicate response functions - they're in response.go
+// ============================================================================
+// USER MANAGEMENT ROUTES (authenticated) - Add these methods
+// ============================================================================
 
 // UpdateUser handles PUT /api/v2/users/{id}
 func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -362,6 +370,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Users can only update their own profile unless they're admin
 	if requestUserID != userID {
 		role, _ := middleware.GetUserRole(r.Context())
 		if role != "admin" && role != "owner" {
@@ -376,12 +385,12 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set the user ID from the URL
 	input.UserID = userID
 
 	output, err := h.updateUserUC.Execute(r.Context(), input)
 	if err != nil {
-		status := mapErrorToStatus(err)
-		respondError(w, status, err.Error())
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -403,6 +412,7 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Users can only delete their own account unless they're admin
 	if requestUserID != userID {
 		role, _ := middleware.GetUserRole(r.Context())
 		if role != "admin" && role != "owner" {
@@ -411,46 +421,16 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var reqBody struct {
-		Reason string `json:"reason"`
-	}
-	json.NewDecoder(r.Body).Decode(&reqBody)
-
+	// Create delete input
 	input := user.DeleteUserInput{
 		UserID: userID,
-		Reason: reqBody.Reason,
 	}
+
 	output, err := h.deleteUserUC.Execute(r.Context(), input)
 	if err != nil {
-		status := mapErrorToStatus(err)
-		respondError(w, status, err.Error())
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	respondSuccess(w, output)
-}
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-func mapErrorToStatus(err error) int {
-	errMsg := err.Error()
-
-	switch {
-	case errMsg == "user not found":
-		return http.StatusNotFound
-	case errMsg == "email already registered":
-		return http.StatusConflict
-	case errMsg == "username already taken":
-		return http.StatusConflict
-	case errMsg == "validation failed" || errMsg == "user ID is required":
-		return http.StatusBadRequest
-	case errMsg == "cannot update inactive user":
-		return http.StatusForbidden
-	case errMsg == "user already deleted":
-		return http.StatusGone
-	default:
-		return http.StatusInternalServerError
-	}
 }

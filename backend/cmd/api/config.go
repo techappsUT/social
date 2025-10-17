@@ -132,7 +132,7 @@ func LoadConfig() *Config {
 		},
 
 		CORS: CORSConfig{
-			AllowedOrigins: strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000"), ","),
+			AllowedOrigins: strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:8000"), ","),
 			AllowedMethods: strings.Split(getEnv("CORS_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS"), ","),
 			AllowedHeaders: strings.Split(getEnv("CORS_HEADERS", "Accept,Authorization,Content-Type,X-Request-ID"), ","),
 		},

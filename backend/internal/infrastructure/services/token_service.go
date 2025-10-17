@@ -1,4 +1,3 @@
-// path: backend/internal/infrastructure/services/token_service.go
 package services
 
 import (
@@ -25,7 +24,7 @@ func NewJWTTokenService(accessSecret, refreshSecret string) common.TokenService 
 	}
 }
 
-// GenerateAccessToken generates a new access token
+// Keep your existing GenerateAccessToken method AS IS
 func (s *JWTTokenService) GenerateAccessToken(userID, email, role string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
@@ -40,7 +39,7 @@ func (s *JWTTokenService) GenerateAccessToken(userID, email, role string) (strin
 	return token.SignedString([]byte(s.accessSecret))
 }
 
-// GenerateRefreshToken generates a new refresh token
+// Keep your existing GenerateRefreshToken method AS IS
 func (s *JWTTokenService) GenerateRefreshToken(userID string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
@@ -53,7 +52,7 @@ func (s *JWTTokenService) GenerateRefreshToken(userID string) (string, error) {
 	return token.SignedString([]byte(s.refreshSecret))
 }
 
-// ValidateAccessToken validates an access token and returns claims
+// Keep your existing ValidateAccessToken method AS IS
 func (s *JWTTokenService) ValidateAccessToken(tokenString string) (*common.TokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -72,17 +71,24 @@ func (s *JWTTokenService) ValidateAccessToken(tokenString string) (*common.Token
 			return nil, fmt.Errorf("invalid token type")
 		}
 
+		// Return claims without EmailVerified (not in TokenClaims struct)
 		return &common.TokenClaims{
 			UserID: claims["user_id"].(string),
 			Email:  claims["email"].(string),
 			Role:   claims["role"].(string),
+			// TeamID is optional - check if exists
+			TeamID: func() string {
+				if teamID, ok := claims["team_id"].(string); ok {
+					return teamID
+				}
+				return ""
+			}(),
 		}, nil
 	}
 
 	return nil, fmt.Errorf("invalid token")
 }
 
-// ✅ ADD THIS METHOD
 // ValidateRefreshToken validates a refresh token and returns claims
 func (s *JWTTokenService) ValidateRefreshToken(tokenString string) (*common.TokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -106,15 +112,24 @@ func (s *JWTTokenService) ValidateRefreshToken(tokenString string) (*common.Toke
 			UserID: claims["user_id"].(string),
 			Email:  "", // Refresh tokens don't include email
 			Role:   "", // Refresh tokens don't include role
+			TeamID: "", // Refresh tokens don't include teamID
 		}, nil
 	}
 
 	return nil, fmt.Errorf("invalid token")
 }
 
-// RevokeRefreshToken revokes a refresh token
+// RevokeRefreshToken revokes a refresh token (placeholder implementation)
 func (s *JWTTokenService) RevokeRefreshToken(ctx context.Context, token string) error {
-	// TODO: Implement token blacklist in Redis/database
-	log.Printf("🔐 Revoking refresh token: %s", token[:20]+"...")
+	// TODO: Implement token blacklist in Redis/database when available
+	log.Printf("🔐 Revoking refresh token: %s...", token[:min(20, len(token))])
 	return nil
+}
+
+// Helper function for min (if not available in your Go version)
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

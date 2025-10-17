@@ -17,7 +17,7 @@ type RateLimiter struct {
 }
 
 // NewRateLimiter creates a new rate limiter
-func NewRateLimiter() *RateLimiter {
+func NewSocialRateLimiter() *RateLimiter {
 	return &RateLimiter{
 		limiters: make(map[string]*rate.Limiter),
 	}

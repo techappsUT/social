@@ -4,7 +4,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useAuthContext } from '@/providers/auth-provider';
+import { useAuth } from '@/providers/auth-provider';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { user } = useAuthContext();
+  const { user } = useAuth();
 
   // Mock data - replace with real API calls
   const stats = [

@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuthContext } from '@/providers/auth-provider';
+import { useAuth } from '@/providers/auth-provider';
 import { useLogout } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
@@ -89,7 +89,7 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuthContext();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { mutate: logout, isPending: isLoggingOut } = useLogout();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuthContext } from '@/providers/auth-provider';
+import { useAuth } from '@/providers/auth-provider';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,7 @@ function getInitials(firstName: string, lastName: string) {
 }
 
 export default function SettingsPage() {
-  const { user } = useAuthContext();
+  const { user } = useAuth();
   const { theme, setTheme } = useTheme();
 
   if (!user) return null;

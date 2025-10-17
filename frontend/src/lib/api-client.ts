@@ -1,4 +1,4 @@
-import { AuthResponse, UserInfo } from '@/types/auth';
+import { AuthResponse } from '@/types/auth';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
@@ -142,6 +142,11 @@ class ApiClient {
     if (typeof window !== 'undefined') {
       localStorage.setItem('accessToken', token);
     }
+  }
+
+  // ✅ FIX: Add missing getAccessToken method
+  getAccessToken(): string | null {
+    return this.accessToken;
   }
 
   clearAuth(): void {

@@ -1,7 +1,9 @@
+// frontend/src/providers/auth-provider.tsx
+// FIXED: Proper auth provider with dashboard protection
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import type { UserInfo } from '@/types/auth';
 
@@ -18,10 +20,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// List of public routes that don't require authentication
+const publicRoutes = ['/login', '/signup', '/forgot-password', '/reset-password', '/verify-email'];
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
 
   // Check authentication status
   const checkAuth = useCallback(async () => {
@@ -33,6 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // ✅ FIX: Use correct endpoint /me
       const userData = await apiClient.get<UserInfo>('/me');
       setUser(userData);
     } catch (error) {
@@ -49,6 +56,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
+  // Route protection
+  useEffect(() => {
+    if (isLoading) return;
+
+    const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
+    const isDashboardRoute = pathname.startsWith('/dashboard');
+
+    if (!user && isDashboardRoute) {
+      // Not authenticated, trying to access dashboard - redirect to login
+      router.push('/login');
+    } else if (user && !user.emailVerified && isDashboardRoute) {
+      // Authenticated but email not verified - redirect to verification
+      router.push('/verify-email');
+    } else if (user && isPublicRoute && pathname !== '/verify-email') {
+      // Authenticated user on public route (except verify-email) - redirect to dashboard
+      router.push('/dashboard');
+    }
+  }, [user, isLoading, pathname, router]);
+
   // Refresh user data
   const refreshUser = useCallback(async () => {
     try {
@@ -56,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(userData);
     } catch (error) {
       console.error('Failed to refresh user:', error);
+      setUser(null);
     }
   }, []);
 
@@ -104,6 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// Hook to use auth context
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -112,20 +140,21 @@ export function useAuth() {
   return context;
 }
 
-// Protected route component
+// Protected route wrapper component
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, isEmailVerified } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!isLoading) {
       if (!isAuthenticated) {
         router.push('/login');
-      } else if (!isEmailVerified) {
+      } else if (!isEmailVerified && pathname !== '/verify-email') {
         router.push('/verify-email');
       }
     }
-  }, [isAuthenticated, isEmailVerified, isLoading, router]);
+  }, [isAuthenticated, isEmailVerified, isLoading, pathname, router]);
 
   if (isLoading) {
     return (
@@ -135,7 +164,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated || !isEmailVerified) {
+  if (!isAuthenticated) {
     return null;
   }
 

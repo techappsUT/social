@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/techappsUT/social-queue/internal/application/common"
@@ -45,20 +44,6 @@ func NewVerifyEmailUseCase(
 }
 
 func (uc *VerifyEmailUseCase) Execute(ctx context.Context, input VerifyEmailInput) (*VerifyEmailOutput, error) {
-	// Development mode - accept dev code
-	if os.Getenv("DEVELOPMENT_MODE") == "true" {
-		devCode := os.Getenv("DEV_EMAIL_VERIFICATION_CODE")
-		if devCode != "" && input.Token == devCode {
-			uc.logger.Info("DEV MODE: Email verification with dev code", "token", devCode)
-
-			// For dev mode, just return success
-			// In a real implementation, you'd verify the most recent unverified user
-			return &VerifyEmailOutput{
-				Success: true,
-				Message: "Email verified successfully (dev mode)",
-			}, nil
-		}
-	}
 	// 1. Get user by verification token
 	dbUser, err := uc.queries.GetUserByVerificationToken(ctx, sql.NullString{
 		String: input.Token,

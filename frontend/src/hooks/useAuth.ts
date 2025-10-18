@@ -1,6 +1,5 @@
 // frontend/src/hooks/useAuth.ts
-// FIXED VERSION - Aligned with Backend
-
+// FIXED: Correct endpoint and response handling
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,7 +17,7 @@ import type {
 } from '@/types/auth';
 
 // ============================================================================
-// API FUNCTIONS (Aligned with Backend)
+// API FUNCTIONS (Fixed endpoints)
 // ============================================================================
 
 async function loginRequest(credentials: LoginCredentials): Promise<AuthResponse> {
@@ -28,7 +27,6 @@ async function loginRequest(credentials: LoginCredentials): Promise<AuthResponse
 }
 
 async function signupRequest(credentials: SignupCredentials): Promise<AuthResponse> {
-  // ✅ FIX: Backend returns AuthResponse on signup, not MessageResponse
   return apiClient.post<AuthResponse>('/auth/signup', credentials, {
     skipAuth: true,
   });
@@ -39,8 +37,8 @@ async function logoutRequest(): Promise<MessageResponse> {
 }
 
 async function getCurrentUser(): Promise<UserInfo> {
-  // ✅ FIX: Changed from '/api/me' to '/auth/me'
-  return apiClient.get<UserInfo>('/auth/me');
+  // ✅ FIX: Correct endpoint - /me is at root level, not under /auth
+  return apiClient.get<UserInfo>('/me');
 }
 
 async function verifyEmailRequest(data: VerifyEmailRequest): Promise<MessageResponse> {
@@ -83,13 +81,19 @@ export function useLogin() {
     onSuccess: (data) => {
       // Store access token
       apiClient.setAccessToken(data.accessToken);
-      // Note: refresh token is automatically stored in HTTP-only cookie by backend
-
+      
       // Cache user data
       queryClient.setQueryData(['user'], data.user);
 
-      // Redirect to dashboard
-      router.push('/dashboard');
+      // Redirect based on email verification status
+      if (!data.user.emailVerified) {
+        router.push('/verify-email');
+      } else {
+        router.push('/dashboard');
+      }
+    },
+    onError: (error) => {
+      console.error('Login error:', error);
     },
   });
 }
@@ -104,12 +108,19 @@ export function useSignup() {
   return useMutation({
     mutationFn: signupRequest,
     onSuccess: (data) => {
-      // ✅ FIX: Backend auto-logs in on signup, so store token and redirect
+      // Backend auto-logs in on signup, so store token
       apiClient.setAccessToken(data.accessToken);
       queryClient.setQueryData(['user'], data.user);
 
-      // Redirect to dashboard (or show email verification prompt if needed)
-      router.push('/dashboard');
+      // Redirect based on email verification status
+      if (!data.user.emailVerified) {
+        router.push('/verify-email');
+      } else {
+        router.push('/dashboard');
+      }
+    },
+    onError: (error) => {
+      console.error('Signup error:', error);
     },
   });
 }
@@ -133,6 +144,13 @@ export function useLogout() {
       // Redirect to login
       router.push('/login');
     },
+    onError: (error) => {
+      console.error('Logout error:', error);
+      // Still clear auth and redirect even on error
+      apiClient.clearAuth();
+      queryClient.clear();
+      router.push('/login');
+    },
   });
 }
 
@@ -154,11 +172,14 @@ export function useCurrentUser() {
  */
 export function useVerifyEmail() {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: verifyEmailRequest,
     onSuccess: () => {
-      router.push('/login?verified=true');
+      // Invalidate user cache to refresh verification status
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      router.push('/dashboard');
     },
   });
 }

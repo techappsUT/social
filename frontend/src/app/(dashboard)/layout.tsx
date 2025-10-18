@@ -1,6 +1,5 @@
 // frontend/src/app/(dashboard)/layout.tsx
-// Complete Dashboard Layout with Sidebar, Header, and Protected Routes
-
+// FIXED: Dashboard layout with proper auth protection and complete UI
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -89,7 +88,7 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading, isEmailVerified } = useAuth();
   const { mutate: logout, isPending: isLoggingOut } = useLogout();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -100,12 +99,16 @@ export default function DashboardLayout({
     setMounted(true);
   }, []);
 
-  // Redirect to login if not authenticated
+  // Protect dashboard routes - updated with email verification check
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/login');
+    if (!isLoading) {
+      if (!isAuthenticated) {
+        router.push('/login');
+      } else if (!isEmailVerified) {
+        router.push('/verify-email');
+      }
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, isEmailVerified, router]);
 
   // Loading state
   if (isLoading || !mounted) {
@@ -119,8 +122,8 @@ export default function DashboardLayout({
     );
   }
 
-  // Not authenticated
-  if (!user) {
+  // Not authenticated or email not verified
+  if (!user || !isEmailVerified) {
     return null;
   }
 
@@ -351,9 +354,9 @@ export default function DashboardLayout({
       </div>
 
       {/* Desktop Header */}
-      <div className="hidden lg:pl-72">
+      <div className="hidden lg:block lg:pl-72">
         <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
-          {/* Search Bar (Placeholder) */}
+          {/* Search Bar */}
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
             <div className="relative flex flex-1 items-center">
               <Search className="pointer-events-none absolute left-3 h-5 w-5 text-gray-400" />

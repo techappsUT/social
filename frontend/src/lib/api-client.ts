@@ -1,168 +1,183 @@
-import { AuthResponse } from '@/types/auth';
+// frontend/src/lib/api-client.ts
+// WORKING VERSION - No CORS issues
+
+import type { AuthResponse } from '@/types/auth';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v2';
+
+/**
+ * Enhanced API Client with automatic token refresh
+ * Aligned with backend authentication flow
+ */
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
   skipRefresh?: boolean;
 }
 
+// Backend response format wrapper
+interface BackendResponse<T = any> {
+  success?: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
 class ApiClient {
-  private baseURL: string;
-  private accessToken: string | null = null;
-  private refreshPromise: Promise<void> | null = null;
+  private isRefreshing = false;
   private refreshQueue: Array<() => void> = [];
-  private csrfToken: string | null = null;
 
-  constructor() {
-    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v2';
-    this.loadStoredToken();
-  }
+  /**
+   * Main request method with automatic token refresh
+   */
+  async request<T>(
+    endpoint: string,
+    options: RequestOptions = {}
+  ): Promise<T> {
+    const { skipAuth = false, skipRefresh = false, ...fetchOptions } = options;
 
-  private loadStoredToken(): void {
-    if (typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem('accessToken');
-    }
-  }
-
-  private async getFingerprint(): Promise<string> {
-    // Simple fingerprint - enhance with more data in production
-    const userAgent = navigator.userAgent;
-    const language = navigator.language;
-    const platform = navigator.platform;
-    const screenResolution = `${screen.width}x${screen.height}`;
-    
-    const fingerprintData = `${userAgent}|${language}|${platform}|${screenResolution}`;
-    const encoder = new TextEncoder();
-    const data = encoder.encode(fingerprintData);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const {
-      skipAuth = false,
-      skipRefresh = false,
-      headers = {},
-      ...fetchOptions
-    } = options;
-
-    // Build headers
-    const requestHeaders: Record<string, string> = {
+    // Prepare headers
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...headers as Record<string, string>,
+      ...(fetchOptions.headers as Record<string, string>),
     };
 
-    // Add auth header if token exists
-    if (!skipAuth && this.accessToken) {
-      requestHeaders['Authorization'] = `Bearer ${this.accessToken}`;
+    // Add auth token if not skipped
+    if (!skipAuth) {
+      const token = this.getAccessToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
     }
 
-    // Add fingerprint
-    requestHeaders['X-Device-Fingerprint'] = await this.getFingerprint();
+    // Make request
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      ...fetchOptions,
+      headers,
+      credentials: 'include', // Include cookies (for refresh token)
+    });
 
-    // Add CSRF token if available
-    if (this.csrfToken) {
-      requestHeaders['X-CSRF-Token'] = this.csrfToken;
+    // Handle 401 Unauthorized - attempt token refresh
+    if (response.status === 401 && !skipRefresh && !skipAuth) {
+      return this.handleUnauthorized(endpoint, options);
     }
 
-    const url = `${this.baseURL}${endpoint}`;
+    // Handle other errors
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({
+        error: 'Request failed',
+        message: response.statusText,
+      }));
+      throw new Error(error.error || error.message || 'Request failed');
+    }
+
+    // Parse response
+    const responseData: BackendResponse<T> = await response.json();
     
+    // ✅ FIX: Unwrap backend response format
+    // If the response has 'data' field and 'success' field, unwrap it
+    if ('success' in responseData && 'data' in responseData) {
+      return responseData.data as T;
+    }
+    
+    // Otherwise return as is (for backward compatibility)
+    return responseData as T;
+  }
+
+  /**
+   * Handle 401 by refreshing token and retrying request
+   */
+  private async handleUnauthorized<T>(
+    endpoint: string,
+    options: RequestOptions
+  ): Promise<T> {
+    // If already refreshing, queue this request
+    if (this.isRefreshing) {
+      return new Promise((resolve, reject) => {
+        this.refreshQueue.push(async () => {
+          try {
+            const result = await this.request<T>(endpoint, {
+              ...options,
+              skipRefresh: true,
+            });
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+    }
+
+    // Start refresh process
+    this.isRefreshing = true;
+
     try {
-      const response = await fetch(url, {
-        ...fetchOptions,
-        headers: requestHeaders,
-        credentials: 'include', // Include cookies
+      // Attempt to refresh token
+      const refreshResponse = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Refresh token is in cookie
       });
 
-      // Extract CSRF token from response
-      const csrfToken = response.headers.get('X-CSRF-Token');
-      if (csrfToken) {
-        this.csrfToken = csrfToken;
+      if (!refreshResponse.ok) {
+        throw new Error('Token refresh failed');
       }
 
-      // Handle 401 - try refresh
-      if (response.status === 401 && !skipRefresh && !skipAuth) {
-        // Wait for any ongoing refresh
-        if (this.refreshPromise) {
-          await this.refreshPromise;
-          return this.request<T>(endpoint, { ...options, skipRefresh: true });
-        }
+      const responseData: BackendResponse<AuthResponse> = await refreshResponse.json();
+      
+      // Unwrap the response
+      const authData = responseData.data || responseData as AuthResponse;
 
-        // Start refresh
-        this.refreshPromise = this.refreshAccessToken();
-        
-        try {
-          await this.refreshPromise;
-          // Retry original request
-          return this.request<T>(endpoint, { ...options, skipRefresh: true });
-        } catch (error) {
-          // Refresh failed - logout
-          this.clearAuth();
-          window.location.href = '/login';
-          throw error;
-        } finally {
-          this.refreshPromise = null;
-        }
-      }
+      // Store new access token
+      this.setAccessToken(authData.accessToken);
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Request failed' }));
-        throw new Error(error.error || error.message || 'Request failed');
-      }
+      // Process queued requests
+      this.refreshQueue.forEach((callback) => callback());
+      this.refreshQueue = [];
 
-      return response.json();
+      // Retry original request
+      return await this.request<T>(endpoint, {
+        ...options,
+        skipRefresh: true,
+      });
     } catch (error) {
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Network error');
+      // Refresh failed - clear auth and redirect to login
+      this.clearAuth();
+      window.location.href = '/login';
+      throw error;
+    } finally {
+      this.isRefreshing = false;
     }
   }
 
-  private async refreshAccessToken(): Promise<void> {
-    const response = await fetch(`${this.baseURL}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Device-Fingerprint': await this.getFingerprint(),
-      },
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Token refresh failed');
-    }
-
-    const data: AuthResponse = await response.json();
-    this.setAccessToken(data.accessToken);
+  /**
+   * Token management
+   */
+  getAccessToken(): string | null {
+    return localStorage.getItem('accessToken');
   }
 
   setAccessToken(token: string): void {
-    this.accessToken = token;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('accessToken', token);
-    }
-  }
-
-  // ✅ FIX: Add missing getAccessToken method
-  getAccessToken(): string | null {
-    return this.accessToken;
+    localStorage.setItem('accessToken', token);
   }
 
   clearAuth(): void {
-    this.accessToken = null;
-    this.csrfToken = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('accessToken');
-    }
+    localStorage.removeItem('accessToken');
+    // Refresh token is cleared via cookie on logout
   }
 
-  // Convenience methods
+  /**
+   * Convenience methods
+   */
   get<T>(endpoint: string, options?: RequestOptions): Promise<T> {
     return this.request<T>(endpoint, { ...options, method: 'GET' });
   }
 
-  post<T>(endpoint: string, data?: unknown, options?: RequestOptions): Promise<T> {
+  post<T>(
+    endpoint: string,
+    data?: unknown,
+    options?: RequestOptions
+  ): Promise<T> {
     return this.request<T>(endpoint, {
       ...options,
       method: 'POST',
@@ -170,10 +185,26 @@ class ApiClient {
     });
   }
 
-  put<T>(endpoint: string, data?: unknown, options?: RequestOptions): Promise<T> {
+  put<T>(
+    endpoint: string,
+    data?: unknown,
+    options?: RequestOptions
+  ): Promise<T> {
     return this.request<T>(endpoint, {
       ...options,
       method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  patch<T>(
+    endpoint: string,
+    data?: unknown,
+    options?: RequestOptions
+  ): Promise<T> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,
     });
   }
@@ -183,5 +214,8 @@ class ApiClient {
   }
 }
 
+// Export singleton instance
 export const apiClient = new ApiClient();
+
+// Export default for convenience
 export default apiClient;

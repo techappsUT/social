@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, UserPlus, Check } from 'lucide-react';
+import { toast } from 'sonner';
 
 // Validation schema - aligned with backend
 const signupSchema = z
@@ -104,8 +105,18 @@ export default function SignupPage() {
   const password = watch('password');
 
   const onSubmit = (data: SignupFormData) => {
-    const { confirmPassword, ...signupData } = data;
-    signup(signupData);
+    // const { confirmPassword, ...signupData } = data;
+    // signup(signupData);
+     // Store email in localStorage before signup
+  localStorage.setItem('userEmail', data.email);
+  
+  signup(data, {
+    onError: (error) => {
+      toast.error('Signup failed', {
+        description: error.message || 'Please try again.',
+      });
+    },
+  });
   };
 
   return (

@@ -33,6 +33,9 @@ type User struct {
 	createdAt     time.Time
 	updatedAt     time.Time
 	deletedAt     *time.Time
+	// ✅ ADD these new fields:
+	verificationToken          string    // ← NEW
+	verificationTokenExpiresAt time.Time // ← NEW
 }
 
 // ============================================================================
@@ -488,3 +491,29 @@ func isValidRole(role Role) bool {
 		return false
 	}
 }
+
+// SetVerificationToken sets the email verification token
+func (u *User) SetVerificationToken(token string, expiresAt time.Time) {
+	u.verificationToken = token
+	u.verificationTokenExpiresAt = expiresAt
+}
+
+// VerificationToken returns the verification token and expiry
+func (u *User) VerificationToken() (string, time.Time) {
+	return u.verificationToken, u.verificationTokenExpiresAt
+}
+
+// // ClearVerificationToken clears the verification token and marks email as verified
+// func (u *User) ClearVerificationToken() {
+// 	u.verificationToken = ""
+// 	u.verificationTokenExpiresAt = time.Time{}
+// 	u.emailVerified = true
+// }
+
+// // IsVerificationTokenValid checks if the token is still valid
+// func (u *User) IsVerificationTokenValid() bool {
+// 	if u.verificationToken == "" {
+// 		return false
+// 	}
+// 	return time.Now().Before(u.verificationTokenExpiresAt)
+// }

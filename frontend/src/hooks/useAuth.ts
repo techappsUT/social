@@ -1,5 +1,6 @@
 // frontend/src/hooks/useAuth.ts
-// FIXED: Correct endpoint and response handling
+// ✅ FIXED VERSION - Handles emailVerified and redirects properly
+
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,7 +18,7 @@ import type {
 } from '@/types/auth';
 
 // ============================================================================
-// API FUNCTIONS (Fixed endpoints)
+// API FUNCTIONS
 // ============================================================================
 
 async function loginRequest(credentials: LoginCredentials): Promise<AuthResponse> {
@@ -37,8 +38,7 @@ async function logoutRequest(): Promise<MessageResponse> {
 }
 
 async function getCurrentUser(): Promise<UserInfo> {
-  // ✅ FIX: Correct endpoint - /me is at root level, not under /auth
-  return apiClient.get<UserInfo>('/me');
+  return apiClient.get<UserInfo>('/auth/me');
 }
 
 async function verifyEmailRequest(data: VerifyEmailRequest): Promise<MessageResponse> {
@@ -85,21 +85,15 @@ export function useLogin() {
       // Cache user data
       queryClient.setQueryData(['user'], data.user);
 
-      // Redirect based on email verification status
-      if (!data.user.emailVerified) {
-        router.push('/verify-email');
-      } else {
-        router.push('/dashboard');
-      }
-    },
-    onError: (error) => {
-      console.error('Login error:', error);
+      // Redirect to dashboard
+      router.push('/dashboard');
     },
   });
 }
 
 /**
  * useSignup - Signup mutation hook
+ * ✅ FIXED: Properly handles emailVerified field and redirects
  */
 export function useSignup() {
   const router = useRouter();
@@ -108,19 +102,47 @@ export function useSignup() {
   return useMutation({
     mutationFn: signupRequest,
     onSuccess: (data) => {
-      // Backend auto-logs in on signup, so store token
+      console.log('✅ Signup successful:', data);
+      
+      // ✅ Store access token
       apiClient.setAccessToken(data.accessToken);
+      
+      // ✅ Validate response structure
+      if (!data.user) {
+        console.error('❌ Error: User data missing in signup response');
+        router.push('/verify-email'); // Fallback to verification
+        return;
+      }
+
+      // ✅ Cache user data
       queryClient.setQueryData(['user'], data.user);
 
-      // Redirect based on email verification status
-      if (!data.user.emailVerified) {
-        router.push('/verify-email');
-      } else {
+      // ✅ Store email for verification resend functionality
+      if (data.user.email) {
+        localStorage.setItem('userEmail', data.user.email);
+        console.log('📧 Stored email for verification:', data.user.email);
+      }
+
+      // ✅ Check emailVerified status with proper null/undefined handling
+      const isEmailVerified = data.user.emailVerified === true;
+      
+      console.log('📋 Email verification status:', {
+        emailVerified: data.user.emailVerified,
+        isVerified: isEmailVerified,
+        willRedirectTo: isEmailVerified ? '/dashboard' : '/verify-email'
+      });
+
+      // ✅ Redirect based on email verification status
+      if (isEmailVerified) {
+        console.log('✅ Email already verified, redirecting to dashboard');
         router.push('/dashboard');
+      } else {
+        console.log('📨 Email not verified, redirecting to verification page');
+        router.push('/verify-email');
       }
     },
     onError: (error) => {
-      console.error('Signup error:', error);
+      console.error('❌ Signup error:', error);
     },
   });
 }
@@ -144,13 +166,6 @@ export function useLogout() {
       // Redirect to login
       router.push('/login');
     },
-    onError: (error) => {
-      console.error('Logout error:', error);
-      // Still clear auth and redirect even on error
-      apiClient.clearAuth();
-      queryClient.clear();
-      router.push('/login');
-    },
   });
 }
 
@@ -163,7 +178,7 @@ export function useCurrentUser() {
     queryFn: getCurrentUser,
     retry: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
-    enabled: !!apiClient.getAccessToken(), // Only run if token exists
+    enabled: !!apiClient.getAccessToken(),
   });
 }
 
@@ -177,9 +192,11 @@ export function useVerifyEmail() {
   return useMutation({
     mutationFn: verifyEmailRequest,
     onSuccess: () => {
-      // Invalidate user cache to refresh verification status
+      // Clear user cache to refetch updated data
       queryClient.invalidateQueries({ queryKey: ['user'] });
-      router.push('/dashboard');
+      
+      // Redirect to login with success message
+      router.push('/login?verified=true');
     },
   });
 }
@@ -227,5 +244,10 @@ export function useAuth() {
     isAuthenticated: !!user,
     isLoading,
     error,
+    refreshUser: async () => {
+      // Manual refetch to get latest user data
+      const queryClient = useQueryClient();
+      await queryClient.invalidateQueries({ queryKey: ['user'] });
+    },
   };
 }

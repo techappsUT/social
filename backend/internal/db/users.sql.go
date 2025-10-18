@@ -102,9 +102,11 @@ INSERT INTO users (
     first_name,
     last_name,
     avatar_url,
-    timezone
+    timezone,
+    verification_token,                  -- ✅ ADDED
+    verification_token_expires_at        -- ✅ ADDED
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
           avatar_url, timezone, locale, is_active, 
@@ -113,14 +115,16 @@ RETURNING id, email, email_verified, password_hash, username, first_name, last_n
 `
 
 type CreateUserParams struct {
-	Email         string         `db:"email" json:"email"`
-	EmailVerified sql.NullBool   `db:"email_verified" json:"email_verified"`
-	PasswordHash  sql.NullString `db:"password_hash" json:"password_hash"`
-	Username      string         `db:"username" json:"username"`
-	FirstName     string         `db:"first_name" json:"first_name"`
-	LastName      string         `db:"last_name" json:"last_name"`
-	AvatarUrl     sql.NullString `db:"avatar_url" json:"avatar_url"`
-	Timezone      sql.NullString `db:"timezone" json:"timezone"`
+	Email                      string         `db:"email" json:"email"`
+	EmailVerified              sql.NullBool   `db:"email_verified" json:"email_verified"`
+	PasswordHash               sql.NullString `db:"password_hash" json:"password_hash"`
+	Username                   string         `db:"username" json:"username"`
+	FirstName                  string         `db:"first_name" json:"first_name"`
+	LastName                   string         `db:"last_name" json:"last_name"`
+	AvatarUrl                  sql.NullString `db:"avatar_url" json:"avatar_url"`
+	Timezone                   sql.NullString `db:"timezone" json:"timezone"`
+	VerificationToken          sql.NullString `db:"verification_token" json:"verification_token"`
+	VerificationTokenExpiresAt sql.NullTime   `db:"verification_token_expires_at" json:"verification_token_expires_at"`
 }
 
 type CreateUserRow struct {
@@ -158,6 +162,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		arg.LastName,
 		arg.AvatarUrl,
 		arg.Timezone,
+		arg.VerificationToken,
+		arg.VerificationTokenExpiresAt,
 	)
 	var i CreateUserRow
 	err := row.Scan(

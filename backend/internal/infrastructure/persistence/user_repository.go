@@ -32,6 +32,9 @@ func NewUserRepository(database *sql.DB, queries *db.Queries) user.Repository {
 // ============================================================================
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
+	// ✅ Get verification token from domain user
+	token, tokenExpiry := u.VerificationToken()
+
 	params := db.CreateUserParams{
 		Email:         u.Email(),
 		EmailVerified: sql.NullBool{Bool: u.IsEmailVerified(), Valid: true},
@@ -41,16 +44,26 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 		LastName:      u.LastName(),
 		AvatarUrl:     sql.NullString{String: u.AvatarURL(), Valid: u.AvatarURL() != ""},
 		Timezone:      sql.NullString{String: "UTC", Valid: true},
+		// ✅ Add verification token fields
+		VerificationToken: sql.NullString{
+			String: token,
+			Valid:  token != "",
+		},
+		VerificationTokenExpiresAt: sql.NullTime{
+			Time:  tokenExpiry,
+			Valid: !tokenExpiry.IsZero(),
+		},
 	}
 
 	_, err := r.queries.CreateUser(ctx, params)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok {
-			if pqErr.Code == "23505" {
+			switch pqErr.Code {
+			case "23505": // unique_violation
 				if pqErr.Constraint == "users_email_key" {
 					return user.ErrEmailAlreadyExists
 				}
-				if pqErr.Constraint == "users_username_key" || pqErr.Constraint == "users_username_unique" {
+				if pqErr.Constraint == "users_username_key" {
 					return user.ErrUsernameAlreadyExists
 				}
 			}

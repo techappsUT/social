@@ -430,6 +430,7 @@ func (c *Container) initializeUseCases() error {
 	// ========================================================================
 	c.CreateUserUC = userUC.NewCreateUserUseCase(
 		c.UserRepo,
+		// c.Queries,
 		c.UserService,
 		c.TokenService,
 		c.EmailService,

@@ -1,16 +1,17 @@
-// path: backend/internal/application/user/create_user.go
+// backend/internal/application/user/create_user.go
+// ✅ FINAL FIX - Generate token BEFORE creating user
+
 package user
 
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"github.com/google/uuid"
 	"github.com/techappsUT/social-queue/internal/application/common"
 	"github.com/techappsUT/social-queue/internal/domain/user"
 )
 
-// CreateUserUseCase handles user registration
 type CreateUserUseCase struct {
 	userRepo     user.Repository
 	userService  *user.Service
@@ -19,23 +20,20 @@ type CreateUserUseCase struct {
 	logger       common.Logger
 }
 
-// CreateUserInput represents the input for creating a user
 type CreateUserInput struct {
-	Email     string `json:"email"`
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
+	Email     string `json:"email" validate:"required,email"`
+	Username  string `json:"username" validate:"required,min=3,max=30"`
+	Password  string `json:"password" validate:"required,min=8"`
+	FirstName string `json:"firstName" validate:"required"`
+	LastName  string `json:"lastName" validate:"required"`
 }
 
-// CreateUserOutput represents the output after creating a user
 type CreateUserOutput struct {
 	User         *UserDTO `json:"user"`
 	AccessToken  string   `json:"accessToken"`
 	RefreshToken string   `json:"refreshToken"`
 }
 
-// UserDTO represents user data transfer object
 type UserDTO struct {
 	ID            string `json:"id"`
 	Email         string `json:"email"`
@@ -47,7 +45,6 @@ type UserDTO struct {
 	EmailVerified bool   `json:"emailVerified"`
 }
 
-// NewCreateUserUseCase creates a new instance
 func NewCreateUserUseCase(
 	userRepo user.Repository,
 	userService *user.Service,
@@ -64,27 +61,45 @@ func NewCreateUserUseCase(
 	}
 }
 
-// Execute performs the user creation
 func (uc *CreateUserUseCase) Execute(ctx context.Context, input CreateUserInput) (*CreateUserOutput, error) {
-	// Validate input
+	// 1. Validate input
 	if err := uc.validateInput(input); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
+		return nil, err
 	}
 
-	// Create user through domain service
-	newUser, err := uc.userService.CreateUser(
+	// ✅ 2. Generate verification token BEFORE creating user
+	verificationToken, err := user.GenerateToken()
+	if err != nil {
+		uc.logger.Error("Failed to generate verification token", "error", err)
+		return nil, fmt.Errorf("failed to generate verification token")
+	}
+	tokenExpiry := time.Now().Add(24 * time.Hour)
+
+	uc.logger.Info("✅ Generated verification token",
+		"tokenPrefix", verificationToken[:10]+"...",
+		"expiresAt", tokenExpiry)
+
+	// ✅ 3. Create user via domain service WITH token
+	newUser, err := uc.userService.CreateUserWithToken(
 		ctx,
 		input.Email,
 		input.Username,
 		input.Password,
 		input.FirstName,
 		input.LastName,
+		verificationToken,
+		tokenExpiry,
 	)
 	if err != nil {
+		uc.logger.Error("Failed to create user", "error", err)
 		return nil, uc.mapDomainError(err)
 	}
 
-	// Generate tokens
+	uc.logger.Info("✅ User created successfully with verification token",
+		"userId", newUser.ID(),
+		"email", newUser.Email())
+
+	// 4. Generate JWT tokens
 	accessToken, err := uc.tokenService.GenerateAccessToken(
 		newUser.ID().String(),
 		newUser.Email(),
@@ -92,26 +107,35 @@ func (uc *CreateUserUseCase) Execute(ctx context.Context, input CreateUserInput)
 	)
 	if err != nil {
 		uc.logger.Error("Failed to generate access token", "error", err)
-		return nil, fmt.Errorf("failed to generate tokens")
+		return nil, fmt.Errorf("failed to generate access token")
 	}
 
 	refreshToken, err := uc.tokenService.GenerateRefreshToken(newUser.ID().String())
 	if err != nil {
 		uc.logger.Error("Failed to generate refresh token", "error", err)
-		return nil, fmt.Errorf("failed to generate tokens")
+		return nil, fmt.Errorf("failed to generate refresh token")
 	}
 
-	// Send verification email (async)
+	// 5. Send verification email asynchronously
 	go func() {
-		token := uc.generateVerificationToken(newUser.ID())
-		if err := uc.emailService.SendVerificationEmail(context.Background(), newUser.Email(), token); err != nil {
-			uc.logger.Error("Failed to send verification email", "error", err)
+		if err := uc.emailService.SendVerificationEmail(
+			context.Background(),
+			newUser.Email(),
+			verificationToken,
+		); err != nil {
+			uc.logger.Error("Failed to send verification email",
+				"email", newUser.Email(),
+				"error", err)
 		}
 	}()
 
-	// Send welcome email (async)
+	// 6. Send welcome email asynchronously
 	go func() {
-		if err := uc.emailService.SendWelcomeEmail(context.Background(), newUser.Email(), newUser.FirstName()); err != nil {
+		if err := uc.emailService.SendWelcomeEmail(
+			context.Background(),
+			newUser.Email(),
+			newUser.FirstName(),
+		); err != nil {
 			uc.logger.Error("Failed to send welcome email", "error", err)
 		}
 	}()
@@ -164,9 +188,4 @@ func (uc *CreateUserUseCase) mapToDTO(u *user.User) *UserDTO {
 		Status:        string(u.Status()),
 		EmailVerified: u.IsEmailVerified(),
 	}
-}
-
-func (uc *CreateUserUseCase) generateVerificationToken(userID uuid.UUID) string {
-	// Simple token generation - in production use a proper token service
-	return fmt.Sprintf("%s-%d", userID.String(), uuid.New().ID())
 }

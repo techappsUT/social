@@ -10,9 +10,11 @@ INSERT INTO users (
     first_name,
     last_name,
     avatar_url,
-    timezone
+    timezone,
+    verification_token,                  -- ✅ ADDED
+    verification_token_expires_at        -- ✅ ADDED
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 RETURNING id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
           avatar_url, timezone, locale, is_active, 

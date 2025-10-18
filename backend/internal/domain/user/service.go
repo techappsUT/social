@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -306,4 +307,48 @@ type AdminUserSpecification struct{}
 
 func (s AdminUserSpecification) IsSatisfiedBy(user *User) bool {
 	return user.IsAdmin()
+}
+
+// Add this method to backend/internal/domain/user/service.go
+
+// CreateUserWithToken creates a new user with a verification token
+func (s *Service) CreateUserWithToken(
+	ctx context.Context,
+	email, username, password, firstName, lastName string,
+	verificationToken string,
+	tokenExpiry time.Time,
+) (*User, error) {
+	// Check if email already exists
+	exists, err := s.repo.ExistsByEmail(ctx, email)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check email existence: %w", err)
+	}
+	if exists {
+		return nil, ErrEmailAlreadyExists
+	}
+
+	// Check if username already exists
+	exists, err = s.repo.ExistsByUsername(ctx, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check username existence: %w", err)
+	}
+	if exists {
+		return nil, ErrUsernameAlreadyExists
+	}
+
+	// Create new user entity
+	user, err := NewUser(email, username, password, firstName, lastName)
+	if err != nil {
+		return nil, err
+	}
+
+	// ✅ Set verification token BEFORE saving
+	user.SetVerificationToken(verificationToken, tokenExpiry)
+
+	// Persist the user (now includes verification token)
+	if err := s.repo.Create(ctx, user); err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return user, nil
 }

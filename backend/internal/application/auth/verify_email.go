@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/techappsUT/social-queue/internal/application/common"
@@ -44,6 +45,31 @@ func NewVerifyEmailUseCase(
 }
 
 func (uc *VerifyEmailUseCase) Execute(ctx context.Context, input VerifyEmailInput) (*VerifyEmailOutput, error) {
+	// Development mode - find most recent unverified user
+	if os.Getenv("DEVELOPMENT_MODE") == "true" {
+		devCode := os.Getenv("DEV_EMAIL_VERIFICATION_CODE")
+		if devCode != "" && input.Token == devCode {
+			uc.logger.Info("DEV MODE: Email verification with dev code", "token", devCode)
+
+			// Find the most recent unverified user
+			// You'll need to add this query to your SQLC queries
+			dbUser, err := uc.queries.GetMostRecentUnverifiedUser(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("no unverified users found")
+			}
+
+			// Clear verification token and mark as verified
+			if err := uc.queries.ClearVerificationToken(ctx, dbUser.ID); err != nil {
+				return nil, fmt.Errorf("failed to verify email")
+			}
+
+			return &VerifyEmailOutput{
+				Success: true,
+				Message: "Email verified successfully (dev mode)",
+			}, nil
+		}
+	}
+
 	// 1. Get user by verification token
 	dbUser, err := uc.queries.GetUserByVerificationToken(ctx, sql.NullString{
 		String: input.Token,

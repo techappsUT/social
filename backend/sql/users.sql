@@ -143,3 +143,9 @@ SET
     is_active = $2,
     updated_at = NOW()
 WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL;
+
+-- name: GetMostRecentUnverifiedUser :one
+SELECT * FROM users
+WHERE email_verified = false
+ORDER BY created_at DESC
+LIMIT 1;

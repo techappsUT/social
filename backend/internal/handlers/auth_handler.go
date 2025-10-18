@@ -171,13 +171,13 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// In dev mode, accept the dev code as valid
-	if h.devMode && h.devCode != "" && input.Token == h.devCode {
-		respondSuccess(w, map[string]interface{}{
-			"success": true,
-			"message": "Email verified successfully (dev mode)",
-		})
-		return
-	}
+	// if h.devMode && h.devCode != "" && input.Token == h.devCode {
+	// 	respondSuccess(w, map[string]interface{}{
+	// 		"success": true,
+	// 		"message": "Email verified successfully (dev mode)",
+	// 	})
+	// 	return
+	// }
 
 	output, err := h.verifyEmailUC.Execute(r.Context(), input)
 	if err != nil {

@@ -1,9 +1,7 @@
-// frontend/src/providers/auth-provider.tsx
-// FIXED: Proper auth provider with dashboard protection
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import type { UserInfo } from '@/types/auth';
 
@@ -12,7 +10,6 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   isEmailVerified: boolean;
-  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   checkAuth: () => Promise<void>;
@@ -20,14 +17,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// List of public routes that don't require authentication
-const publicRoutes = ['/login', '/signup', '/forgot-password', '/reset-password', '/verify-email'];
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
-  const pathname = usePathname();
 
   // Check authentication status
   const checkAuth = useCallback(async () => {
@@ -39,9 +32,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // ✅ FIX: Use correct endpoint /me
-      const userData = await apiClient.get<UserInfo>('/me');
-      setUser(userData);
+      // ✅ Extract from .data.user wrapper
+      const response = await apiClient.get<{ data: { user: UserInfo } }>('/me');
+      console.log('🔍 Auth check response:', response);
+      setUser(response.data.user);
     } catch (error) {
       console.error('Auth check failed:', error);
       setUser(null);
@@ -56,53 +50,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
-  // Route protection
-  useEffect(() => {
-    if (isLoading) return;
-
-    const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
-    const isDashboardRoute = pathname.startsWith('/dashboard');
-
-    if (!user && isDashboardRoute) {
-      // Not authenticated, trying to access dashboard - redirect to login
-      router.push('/login');
-    } else if (user && !user.emailVerified && isDashboardRoute) {
-      // Authenticated but email not verified - redirect to verification
-      router.push('/verify-email');
-    } else if (user && isPublicRoute && pathname !== '/verify-email') {
-      // Authenticated user on public route (except verify-email) - redirect to dashboard
-      router.push('/dashboard');
-    }
-  }, [user, isLoading, pathname, router]);
-
   // Refresh user data
   const refreshUser = useCallback(async () => {
     try {
-      const userData = await apiClient.get<UserInfo>('/me');
-      setUser(userData);
+      const response = await apiClient.get<{ data: { user: UserInfo } }>('/me');
+      console.log('🔄 User refreshed:', response.data.user);
+      setUser(response.data.user);
     } catch (error) {
       console.error('Failed to refresh user:', error);
-      setUser(null);
     }
   }, []);
-
-  // Login
-  const login = useCallback(async (email: string, password: string) => {
-    const response = await apiClient.post<{
-      accessToken: string;
-      user: UserInfo;
-    }>('/auth/login', { identifier: email, password }, { skipAuth: true });
-    
-    apiClient.setAccessToken(response.accessToken);
-    setUser(response.user);
-    
-    // Redirect based on email verification status
-    if (!response.user.emailVerified) {
-      router.push('/verify-email');
-    } else {
-      router.push('/dashboard');
-    }
-  }, [router]);
 
   // Logout
   const logout = useCallback(async () => {
@@ -113,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       apiClient.clearAuth();
       setUser(null);
+      localStorage.removeItem('userEmail');
       router.push('/login');
     }
   }, [router]);
@@ -122,7 +80,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAuthenticated: !!user,
     isLoading,
     isEmailVerified: user?.emailVerified || false,
-    login,
     logout,
     refreshUser,
     checkAuth,
@@ -131,7 +88,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// Hook to use auth context
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -140,33 +96,5 @@ export function useAuth() {
   return context;
 }
 
-// Protected route wrapper component
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, isEmailVerified } = useAuth();
-  const router = useRouter();
-  const pathname = usePathname();
-
-  useEffect(() => {
-    if (!isLoading) {
-      if (!isAuthenticated) {
-        router.push('/login');
-      } else if (!isEmailVerified && pathname !== '/verify-email') {
-        router.push('/verify-email');
-      }
-    }
-  }, [isAuthenticated, isEmailVerified, isLoading, pathname, router]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  return <>{children}</>;
-}
+// ❌ REMOVE ProtectedRoute component - it causes redirect loops
+// The dashboard layout will handle protection instead

@@ -191,6 +191,41 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 	return i, err
 }
 
+const GetMostRecentUnverifiedUser = `-- name: GetMostRecentUnverifiedUser :one
+SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, avatar_url, timezone, locale, is_active, last_login_at, created_at, updated_at, deleted_at, verification_token, verification_token_expires_at, reset_token, reset_token_expires_at FROM users
+WHERE email_verified = false
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetMostRecentUnverifiedUser(ctx context.Context) (User, error) {
+	row := q.db.QueryRowContext(ctx, GetMostRecentUnverifiedUser)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.Username,
+		&i.FirstName,
+		&i.LastName,
+		&i.FullName,
+		&i.AvatarUrl,
+		&i.Timezone,
+		&i.Locale,
+		&i.IsActive,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.VerificationToken,
+		&i.VerificationTokenExpiresAt,
+		&i.ResetToken,
+		&i.ResetTokenExpiresAt,
+	)
+	return i, err
+}
+
 const GetUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, email_verified, password_hash, username, first_name, last_name, full_name, 
        avatar_url, timezone, locale, is_active,

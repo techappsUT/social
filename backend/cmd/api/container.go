@@ -92,6 +92,9 @@ type Container struct {
 	RemoveMemberUC     *teamUC.RemoveMemberUseCase
 	UpdateMemberRoleUC *teamUC.UpdateMemberRoleUseCase
 
+	AcceptInvitationUC      *teamUC.AcceptInvitationUseCase      // NEW
+	GetPendingInvitationsUC *teamUC.GetPendingInvitationsUseCase // NEW
+
 	// Use Cases - Post
 	CreateDraftUC  *postUC.CreateDraftUseCase
 	SchedulePostUC *postUC.SchedulePostUseCase
@@ -511,6 +514,22 @@ func (c *Container) initializeUseCases() error {
 		c.Logger,
 	)
 
+	// Accept Invitation Use Case
+	c.AcceptInvitationUC = teamUC.NewAcceptInvitationUseCase(
+		c.TeamRepo,
+		c.MemberRepo,
+		c.UserRepo,
+		c.Logger,
+	)
+
+	// Get Pending Invitations Use Case
+	c.GetPendingInvitationsUC = teamUC.NewGetPendingInvitationsUseCase(
+		c.TeamRepo,
+		c.MemberRepo,
+		c.UserRepo,
+		c.Logger,
+	)
+
 	// ========================================================================
 	// POST USE CASES
 	// ========================================================================
@@ -637,6 +656,8 @@ func (c *Container) initializeHandlers() error {
 		c.InviteMemberUC,
 		c.RemoveMemberUC,
 		c.UpdateMemberRoleUC,
+		c.AcceptInvitationUC,      // NEW
+		c.GetPendingInvitationsUC, // NEW
 	)
 
 	// Post Handler

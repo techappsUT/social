@@ -7,11 +7,9 @@ import (
 	"github.com/techappsUT/social-queue/internal/middleware"
 )
 
-// RegisterTeamRoutes registers team-related routes
 func RegisterTeamRoutes(r chi.Router, h *handlers.TeamHandler, authMW *middleware.AuthMiddleware) {
 	r.Route("/teams", func(r chi.Router) {
 		r.Use(authMW.RequireAuth)
-		r.Use(middleware.ValidateRequest) // ✅ Add validation middleware
 
 		// Team CRUD
 		r.Get("/", h.ListTeams)
@@ -24,5 +22,14 @@ func RegisterTeamRoutes(r chi.Router, h *handlers.TeamHandler, authMW *middlewar
 		r.Post("/{id}/members", h.InviteMember)
 		r.Delete("/{id}/members/{userId}", h.RemoveMember)
 		r.Patch("/{id}/members/{userId}/role", h.UpdateMemberRole)
+
+		// NEW: Accept invitation
+		r.Post("/{id}/accept", h.AcceptInvitation)
+	})
+
+	// NEW: Invitations route (separate from /teams)
+	r.Route("/invitations", func(r chi.Router) {
+		r.Use(authMW.RequireAuth)
+		r.Get("/pending", h.GetPendingInvitations)
 	})
 }

@@ -37,6 +37,7 @@ import {
   Users, // ✅ NEW: Added for Teams
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TeamAccessCheck } from '@/components/auth/TeamAccessCheck';
 
 // ✅ UPDATED: Navigation items configuration with Teams added
 const navigation = [
@@ -453,7 +454,9 @@ export default function DashboardLayout({
 
         {/* Page content */}
         <div className="px-4 py-8 sm:px-6 lg:px-8">
+          {/* <TeamAccessCheck> */}
           {children}
+          {/* </TeamAccessCheck> */}
         </div>
       </main>
     </div>

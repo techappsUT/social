@@ -90,6 +90,10 @@ export function useLogin() {
       
       // Store access token
       apiClient.setAccessToken(accessToken);
+
+      
+      // ✅ FIX: Store user ID
+      localStorage.setItem('userId', user.id);
       
       // Cache user data
       queryClient.setQueryData(['user'], user);
@@ -142,6 +146,9 @@ export function useSignup() {
 
       // ✅ Store access token
       apiClient.setAccessToken(accessToken);
+
+      // ✅ FIX: Store user ID
+      localStorage.setItem('userId', user.id);
       
       // ✅ Cache user data
       queryClient.setQueryData(['user'], user);
@@ -190,6 +197,9 @@ export function useLogout() {
       
       // Clear access token
       apiClient.clearAuth();
+
+      // ✅ FIX: Clear user ID
+      localStorage.removeItem('userId');
 
       // Clear all cached data
       queryClient.clear();

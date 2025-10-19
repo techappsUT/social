@@ -17,14 +17,16 @@ import (
 )
 
 type TeamHandler struct {
-	createTeamUC       *team.CreateTeamUseCase
-	getTeamUC          *team.GetTeamUseCase
-	updateTeamUC       *team.UpdateTeamUseCase
-	deleteTeamUC       *team.DeleteTeamUseCase
-	listTeamsUC        *team.ListTeamsUseCase
-	inviteMemberUC     *team.InviteMemberUseCase     // NEW
-	removeMemberUC     *team.RemoveMemberUseCase     // NEW
-	updateMemberRoleUC *team.UpdateMemberRoleUseCase // NEW
+	createTeamUC            *team.CreateTeamUseCase
+	getTeamUC               *team.GetTeamUseCase
+	updateTeamUC            *team.UpdateTeamUseCase
+	deleteTeamUC            *team.DeleteTeamUseCase
+	listTeamsUC             *team.ListTeamsUseCase
+	inviteMemberUC          *team.InviteMemberUseCase          // NEW
+	removeMemberUC          *team.RemoveMemberUseCase          // NEW
+	updateMemberRoleUC      *team.UpdateMemberRoleUseCase      // NEW
+	acceptInvitationUC      *team.AcceptInvitationUseCase      // NEW
+	getPendingInvitationsUC *team.GetPendingInvitationsUseCase // NEW
 }
 
 func NewTeamHandler(
@@ -36,16 +38,20 @@ func NewTeamHandler(
 	inviteMemberUC *team.InviteMemberUseCase, // NEW
 	removeMemberUC *team.RemoveMemberUseCase, // NEW
 	updateMemberRoleUC *team.UpdateMemberRoleUseCase, // NEW
+	acceptInvitationUC *team.AcceptInvitationUseCase, // NEW
+	getPendingInvitationsUC *team.GetPendingInvitationsUseCase, // NEW
 ) *TeamHandler {
 	return &TeamHandler{
-		createTeamUC:       createTeamUC,
-		getTeamUC:          getTeamUC,
-		updateTeamUC:       updateTeamUC,
-		deleteTeamUC:       deleteTeamUC,
-		listTeamsUC:        listTeamsUC,
-		inviteMemberUC:     inviteMemberUC,     // NEW
-		removeMemberUC:     removeMemberUC,     // NEW
-		updateMemberRoleUC: updateMemberRoleUC, // NEW
+		createTeamUC:            createTeamUC,
+		getTeamUC:               getTeamUC,
+		updateTeamUC:            updateTeamUC,
+		deleteTeamUC:            deleteTeamUC,
+		listTeamsUC:             listTeamsUC,
+		inviteMemberUC:          inviteMemberUC,          // NEW
+		removeMemberUC:          removeMemberUC,          // NEW
+		updateMemberRoleUC:      updateMemberRoleUC,      // NEW
+		acceptInvitationUC:      acceptInvitationUC,      // NEW
+		getPendingInvitationsUC: getPendingInvitationsUC, // NEW
 	}
 }
 
@@ -411,5 +417,73 @@ func (h *TeamHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	middleware.RespondSuccess(w, output)
+}
+
+// ============================================================================
+// NEW INVITATION HANDLERS
+// ============================================================================
+
+// AcceptInvitation handles POST /api/v2/teams/:id/accept
+func (h *TeamHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	// 1. Get authenticated user
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		middleware.RespondUnauthorized(w, "Authentication required")
+		return
+	}
+
+	// 2. Validate team ID from URL
+	teamIDStr := chi.URLParam(r, "id")
+	teamID, err := uuid.Parse(teamIDStr)
+	if err != nil {
+		middleware.RespondError(w, http.StatusBadRequest, "invalid_id", "Invalid team ID format")
+		return
+	}
+
+	// 3. Execute use case
+	input := team.AcceptInvitationInput{
+		TeamID: teamID,
+		UserID: userID,
+	}
+
+	output, err := h.acceptInvitationUC.Execute(r.Context(), input)
+	if err != nil {
+		switch {
+		case err.Error() == "invitation not found":
+			middleware.RespondNotFound(w, "invitation")
+		case err.Error() == "invitation already processed":
+			middleware.RespondConflict(w, "Invitation has already been processed")
+		default:
+			middleware.RespondInternalError(w, "Failed to accept invitation")
+		}
+		return
+	}
+
+	// 4. Success response
+	middleware.RespondSuccess(w, output)
+}
+
+// GetPendingInvitations handles GET /api/v2/invitations/pending
+func (h *TeamHandler) GetPendingInvitations(w http.ResponseWriter, r *http.Request) {
+	// 1. Get authenticated user
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		middleware.RespondUnauthorized(w, "Authentication required")
+		return
+	}
+
+	// 2. Execute use case
+	input := team.GetPendingInvitationsInput{
+		UserID: userID,
+	}
+
+	output, err := h.getPendingInvitationsUC.Execute(r.Context(), input)
+	if err != nil {
+		middleware.RespondInternalError(w, "Failed to get pending invitations")
+		return
+	}
+
+	// 3. Success response
 	middleware.RespondSuccess(w, output)
 }

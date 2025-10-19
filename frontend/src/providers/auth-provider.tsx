@@ -35,10 +35,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ✅ Extract from .data.user wrapper
       const response = await apiClient.get<{ data: { user: UserInfo } }>('/me');
       console.log('🔍 Auth check response:', response);
+
+      // ✅ FIX: Store user ID when checking auth
+      const userData = response.data.user;
+      localStorage.setItem('userId', userData.id);
+
       setUser(response.data.user);
     } catch (error) {
       console.error('Auth check failed:', error);
       setUser(null);
+      
+      // ✅ FIX: Clear user ID on error
+      localStorage.removeItem('userId');
+
       apiClient.clearAuth();
     } finally {
       setIsLoading(false);
@@ -70,6 +79,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       apiClient.clearAuth();
       setUser(null);
+      
+      // ✅ FIX: Clear user ID
+      localStorage.removeItem('userId');
       localStorage.removeItem('userEmail');
       router.push('/login');
     }

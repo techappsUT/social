@@ -30,6 +30,7 @@ export interface Team {
   memberCount: number;
   createdAt: string;
   updatedAt: string;
+  memberStatus: 'active' | 'pending' | 'removed';
 }
 
 export interface TeamSettings {
@@ -143,4 +144,39 @@ export async function inviteTeamMember(
         data
     );
     return response.data.member;
+}
+
+// ===========================================================================
+// FILE: frontend/src/lib/api/teams.ts
+// UPDATE - Add invitation functions
+// ===========================================================================
+
+export interface PendingInvitation {
+  teamId: string;
+  teamName: string;
+  teamSlug: string;
+  role: 'owner' | 'admin' | 'editor' | 'viewer';
+  invitedBy: string;
+  invitedAt: string;
+  inviterName?: string;
+}
+
+/**
+ * Get pending team invitations for current user
+ */
+export async function getPendingInvitations(): Promise<PendingInvitation[]> {
+  const response = await apiClient.get<ApiResponse<{ invitations: PendingInvitation[] }>>(
+    '/invitations/pending'
+  );
+  return response.data.invitations || [];
+}
+
+/**
+ * Accept a team invitation
+ */
+export async function acceptInvitation(teamId: string): Promise<{ team: Team; member: TeamMember }> {
+  const response = await apiClient.post<ApiResponse<{ team: Team; member: TeamMember }>>(
+    `/teams/${teamId}/accept`
+  );
+  return response.data;
 }

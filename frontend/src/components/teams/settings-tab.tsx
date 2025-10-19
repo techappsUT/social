@@ -1,11 +1,11 @@
-
 // ===========================================================================
 // FILE: frontend/src/components/teams/settings-tab.tsx
-// Team settings management (timezone, preferences, etc.)
+// Team settings management with delete team functionality
 // ===========================================================================
 
 'use client';
 
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -31,7 +31,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save, Trash2 } from 'lucide-react';
+import { DeleteTeamDialog } from './delete-team-dialog';
 
 const settingsSchema = z.object({
   name: z
@@ -49,6 +50,7 @@ interface SettingsTabProps {
 
 export function SettingsTab({ team, canManageSettings }: SettingsTabProps) {
   const updateTeam = useUpdateTeam(team.id);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const form = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -67,6 +69,13 @@ export function SettingsTab({ team, canManageSettings }: SettingsTabProps) {
 
   const hasChanges = form.formState.isDirty;
 
+  // Get current user's role to determine if they can delete
+  const currentUserId = typeof window !== 'undefined' 
+    ? localStorage.getItem('userId') 
+    : null;
+  const currentUserMember = team.members.find(m => m.userId === currentUserId);
+  const canDeleteTeam = currentUserMember?.role === 'owner';
+
   if (!canManageSettings) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -78,162 +87,185 @@ export function SettingsTab({ team, canManageSettings }: SettingsTabProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-          {/* Basic Settings */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-lg font-medium">Basic Settings</h3>
-              <p className="text-sm text-muted-foreground">
-                Update your team's basic information
-              </p>
-            </div>
-            <Separator />
-
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Team Name</FormLabel>
-                  <FormControl>
-                    <Input {...field} placeholder="My Awesome Team" />
-                  </FormControl>
-                  <FormDescription>
-                    This is your team's public display name
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
+    <>
+      <div className="space-y-6">
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+            {/* Basic Settings */}
             <div className="space-y-4">
-              <div className="space-y-2">
-                <FormLabel>Team Slug</FormLabel>
-                <Input value={team.slug} disabled />
-                <FormDescription>
-                  Your unique team identifier (cannot be changed)
-                </FormDescription>
+              <div>
+                <h3 className="text-lg font-medium">Basic Settings</h3>
+                <p className="text-sm text-muted-foreground">
+                  Update your team's basic information
+                </p>
+              </div>
+              <Separator />
+
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Team Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="My Awesome Team" />
+                    </FormControl>
+                    <FormDescription>
+                      This is your team's public display name
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <FormLabel>Team Slug</FormLabel>
+                  <Input value={team.slug} disabled />
+                  <FormDescription>
+                    Your unique team identifier (cannot be changed)
+                  </FormDescription>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Preferences */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-lg font-medium">Preferences</h3>
-              <p className="text-sm text-muted-foreground">
-                Configure team-wide preferences
-              </p>
-            </div>
-            <Separator />
-
+            {/* Preferences */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <FormLabel>Timezone</FormLabel>
-                  <FormDescription>
-                    Default timezone for scheduling posts
-                  </FormDescription>
-                </div>
-                <Select defaultValue={team.settings.timezone} disabled>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="UTC">UTC</SelectItem>
-                    <SelectItem value="America/New_York">Eastern Time</SelectItem>
-                    <SelectItem value="America/Los_Angeles">Pacific Time</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div>
+                <h3 className="text-lg font-medium">Preferences</h3>
+                <p className="text-sm text-muted-foreground">
+                  Configure team-wide preferences
+                </p>
               </div>
+              <Separator />
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <FormLabel>Email Notifications</FormLabel>
-                  <FormDescription>
-                    Receive email updates about team activity
-                  </FormDescription>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <FormLabel>Timezone</FormLabel>
+                    <FormDescription>
+                      Default timezone for scheduling posts
+                    </FormDescription>
+                  </div>
+                  <Select defaultValue={team.settings.timezone} disabled>
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="UTC">UTC</SelectItem>
+                      <SelectItem value="America/New_York">Eastern Time</SelectItem>
+                      <SelectItem value="America/Los_Angeles">Pacific Time</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch
-                  defaultChecked={team.settings.enableNotifications}
-                  disabled
-                />
-              </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <FormLabel>Require Approval</FormLabel>
-                  <FormDescription>
-                    Posts must be approved before publishing
-                  </FormDescription>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <FormLabel>Email Notifications</FormLabel>
+                    <FormDescription>
+                      Receive email updates about team activity
+                    </FormDescription>
+                  </div>
+                  <Switch
+                    defaultChecked={team.settings.enableNotifications}
+                    disabled
+                  />
                 </div>
-                <Switch
-                  defaultChecked={team.settings.requireApproval}
-                  disabled
-                />
-              </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <FormLabel>Analytics</FormLabel>
-                  <FormDescription>
-                    Track team performance and insights
-                  </FormDescription>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <FormLabel>Require Approval</FormLabel>
+                    <FormDescription>
+                      Posts must be approved before publishing
+                    </FormDescription>
+                  </div>
+                  <Switch
+                    defaultChecked={team.settings.requireApproval}
+                    disabled
+                  />
                 </div>
-                <Switch
-                  defaultChecked={team.settings.enableAnalytics}
-                  disabled
-                />
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <FormLabel>Analytics</FormLabel>
+                    <FormDescription>
+                      Track team performance and insights
+                    </FormDescription>
+                  </div>
+                  <Switch
+                    defaultChecked={team.settings.enableAnalytics}
+                    disabled
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Save Button */}
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              disabled={!hasChanges || updateTeam.isPending}
-            >
-              {updateTeam.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Changes
-                </>
-              )}
-            </Button>
-          </div>
-        </form>
-      </Form>
+            {/* Save Button */}
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                disabled={!hasChanges || updateTeam.isPending}
+              >
+                {updateTeam.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </Form>
 
-      {/* Danger Zone */}
-      <div className="space-y-4 pt-6">
-        <div>
-          <h3 className="text-lg font-medium text-destructive">Danger Zone</h3>
-          <p className="text-sm text-muted-foreground">
-            Irreversible actions that require caution
-          </p>
-        </div>
-        <Separator />
-        
-        <div className="rounded-lg border border-destructive/50 p-4 space-y-3">
+        {/* Danger Zone */}
+        <div className="space-y-4 pt-6">
           <div>
-            <h4 className="font-medium">Delete Team</h4>
+            <h3 className="text-lg font-medium text-destructive">Danger Zone</h3>
             <p className="text-sm text-muted-foreground">
-              Permanently delete this team and all associated data. This action cannot be undone.
+              Irreversible actions that require caution
             </p>
           </div>
-          <Button variant="destructive" size="sm" disabled>
-            Delete Team
-          </Button>
+          <Separator />
+          
+          <div className="rounded-lg border border-destructive/50 p-4 space-y-3">
+            <div>
+              <h4 className="font-medium">Delete Team</h4>
+              <p className="text-sm text-muted-foreground">
+                Permanently delete this team and all associated data. This action cannot be undone.
+              </p>
+            </div>
+            <Button 
+              variant="destructive" 
+              size="sm"
+              onClick={() => setShowDeleteDialog(true)}
+              disabled={!canDeleteTeam}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete Team
+            </Button>
+            {!canDeleteTeam && (
+              <p className="text-sm text-muted-foreground">
+                Only the team owner can delete this team.
+              </p>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Delete Team Dialog */}
+      {canDeleteTeam && (
+        <DeleteTeamDialog
+          teamId={team.id}
+          teamName={team.name}
+          open={showDeleteDialog}
+          onOpenChange={setShowDeleteDialog}
+        />
+      )}
+    </>
   );
 }

@@ -497,7 +497,7 @@ func getDefaultLimits(plan Plan) TeamLimits {
 	switch plan {
 	case PlanFree:
 		return TeamLimits{
-			MaxMembers:         1,
+			MaxMembers:         3,
 			MaxSocialAccounts:  3,
 			MaxScheduledPosts:  10,
 			MaxPostsPerDay:     5,

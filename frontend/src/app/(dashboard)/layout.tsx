@@ -1,5 +1,5 @@
 // frontend/src/app/(dashboard)/layout.tsx
-// ✅ FIXED: Dashboard layout with React Query as single source of truth
+// ✅ UPDATED: Dashboard layout with Teams navigation added
 
 'use client';
 
@@ -34,10 +34,11 @@ import {
   User,
   Bell,
   Search,
+  Users, // ✅ NEW: Added for Teams
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Navigation items configuration
+// ✅ UPDATED: Navigation items configuration with Teams added
 const navigation = [
   {
     name: 'Dashboard',
@@ -47,31 +48,37 @@ const navigation = [
   },
   {
     name: 'Compose',
-    href: '/dashboard/compose',
+    href: '/compose',
     icon: PenSquare,
     description: 'Create new posts',
   },
   {
     name: 'Queue',
-    href: '/dashboard/queue',
+    href: '/queue',
     icon: Calendar,
     description: 'Scheduled posts',
   },
   {
+    name: 'Teams', // ✅ NEW: Teams navigation item
+    href: '/teams',
+    icon: Users,
+    description: 'Manage teams and collaborate',
+  },
+  {
     name: 'Analytics',
-    href: '/dashboard/analytics',
+    href: '/analytics',
     icon: BarChart3,
     description: 'Performance metrics',
   },
   {
     name: 'Accounts',
-    href: '/dashboard/accounts',
+    href: '/accounts',
     icon: Link2,
     description: 'Connected social accounts',
   },
   {
     name: 'Settings',
-    href: '/dashboard/settings',
+    href: '/settings',
     icon: Settings,
     description: 'Account settings',
   },
@@ -89,7 +96,7 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const router = useRouter();
   
-  // ✅ FIXED: Use React Query directly instead of auth-provider
+  // ✅ Use React Query directly instead of auth-provider
   const { data: user, isLoading } = useCurrentUser();
   const isAuthenticated = !!user;
   const isEmailVerified = user?.emailVerified || false;
@@ -104,7 +111,7 @@ export default function DashboardLayout({
     setMounted(true);
   }, []);
 
-  // ✅ FIXED: Protect dashboard routes with proper checks
+  // ✅ Protect dashboard routes with proper checks
   useEffect(() => {
     if (!isLoading && mounted) {
       console.log('🔍 Dashboard auth check:', {
@@ -176,7 +183,11 @@ export default function DashboardLayout({
               <li>
                 <ul role="list" className="-mx-2 space-y-1">
                   {navigation.map((item) => {
-                    const isActive = pathname === item.href;
+                    // ✅ UPDATED: Check if current path starts with item href for nested routes
+                    const isActive = 
+                      pathname === item.href || 
+                      (item.href !== '/dashboard' && pathname.startsWith(item.href));
+                    
                     return (
                       <li key={item.name}>
                         <Link
@@ -238,7 +249,11 @@ export default function DashboardLayout({
                   <li>
                     <ul role="list" className="-mx-2 space-y-1">
                       {navigation.map((item) => {
-                        const isActive = pathname === item.href;
+                        // ✅ UPDATED: Check if current path starts with item href for nested routes
+                        const isActive = 
+                          pathname === item.href || 
+                          (item.href !== '/dashboard' && pathname.startsWith(item.href));
+                        
                         return (
                           <li key={item.name}>
                             <Link
@@ -376,7 +391,7 @@ export default function DashboardLayout({
                       </AvatarFallback>
                     </Avatar>
                     <span className="hidden lg:flex lg:items-center">
-                      <span className="text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100">
+                      <span className="text-sm font-semibold">
                         {user.firstName} {user.lastName}
                       </span>
                     </span>
@@ -393,6 +408,10 @@ export default function DashboardLayout({
                   <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
                     <User className="mr-2 h-4 w-4" />
                     Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push('/dashboard/teams')}>
+                    <Users className="mr-2 h-4 w-4" />
+                    Teams
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
                     <Settings className="mr-2 h-4 w-4" />
@@ -433,7 +452,7 @@ export default function DashboardLayout({
         </div>
 
         {/* Page content */}
-        <div className="px-4 py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-8 sm:px-6 lg:px-8">
           {children}
         </div>
       </main>

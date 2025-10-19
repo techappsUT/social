@@ -7,12 +7,13 @@ package team
 import (
 	"context"
 	"fmt"
-	"regexp"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/techappsUT/social-queue/internal/application/common"
 	teamDomain "github.com/techappsUT/social-queue/internal/domain/team"
 	"github.com/techappsUT/social-queue/internal/domain/user"
+	"github.com/techappsUT/social-queue/internal/middleware"
 )
 
 type InviteMemberInput struct {
@@ -27,6 +28,7 @@ type InviteMemberOutput struct {
 }
 
 type InviteMemberUseCase struct {
+	validator    *validator.Validate // ADD THIS
 	teamRepo     teamDomain.Repository
 	memberRepo   teamDomain.MemberRepository
 	userRepo     user.Repository
@@ -52,8 +54,14 @@ func NewInviteMemberUseCase(
 
 func (uc *InviteMemberUseCase) Execute(ctx context.Context, input InviteMemberInput) (*InviteMemberOutput, error) {
 	// 1. Validate email format
-	if err := uc.validateEmail(input.Email); err != nil {
-		return nil, err
+	// if err := uc.validateEmail(input.Email); err != nil {
+	// 	return nil, err
+	// }
+	// ✅ Single validation call
+	if err := uc.validator.Struct(input); err != nil {
+		// return nil, formatValidationError(err)
+		fields := middleware.FormatValidationErrors(err)
+		return nil, fmt.Errorf("validation failed: %v", fields)
 	}
 
 	// 2. Validate role
@@ -152,18 +160,18 @@ func (uc *InviteMemberUseCase) Execute(ctx context.Context, input InviteMemberIn
 }
 
 // validateEmail validates email format
-func (uc *InviteMemberUseCase) validateEmail(email string) error {
-	if email == "" {
-		return fmt.Errorf("email is required")
-	}
+// func (uc *InviteMemberUseCase) validateEmail(email string) error {
+// 	if email == "" {
+// 		return fmt.Errorf("email is required")
+// 	}
 
-	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-	if !emailRegex.MatchString(email) {
-		return fmt.Errorf("invalid email format")
-	}
+// 	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+// 	if !emailRegex.MatchString(email) {
+// 		return fmt.Errorf("invalid email format")
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // isValidRole checks if the role is valid
 func (uc *InviteMemberUseCase) isValidRole(role teamDomain.MemberRole) bool {
@@ -182,3 +190,15 @@ func (uc *InviteMemberUseCase) isValidRole(role teamDomain.MemberRole) bool {
 
 	return false
 }
+
+// Helper to format validator errors
+// func formatValidationError(err error) error {
+// 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
+// 		var errors []string
+// 		for _, e := range validationErrors {
+// 			errors = append(errors, fmt.Sprintf("%s: %s", e.Field(), e.Tag()))
+// 		}
+// 		return fmt.Errorf("validation failed: %s", strings.Join(errors, ", "))
+// 	}
+// 	return err
+// }

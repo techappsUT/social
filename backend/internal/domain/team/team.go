@@ -539,3 +539,51 @@ func getDefaultLimits(plan Plan) TeamLimits {
 		return getDefaultLimits(PlanFree)
 	}
 }
+
+// ===========================================================================
+// FILE: backend/internal/domain/team/team.go
+// ADD this method to your existing team.go file
+// ===========================================================================
+
+// Add this method after the NewTeam function
+
+// ReconstructTeam recreates a team from persistence (repository)
+// This is used when loading teams from the database
+func ReconstructTeam(
+	id uuid.UUID,
+	name string,
+	slug string,
+	description string,
+	ownerID uuid.UUID,
+	settings TeamSettings,
+) (*Team, error) {
+	// Validate the data
+	if err := validateTeamName(name); err != nil {
+		return nil, err
+	}
+
+	if err := validateSlug(slug); err != nil {
+		return nil, err
+	}
+
+	if ownerID == uuid.Nil {
+		return nil, ErrInvalidOwner
+	}
+
+	// Get limits based on plan (default to free)
+	limits := getDefaultLimits(PlanFree)
+
+	return &Team{
+		id:          id, // ✅ Use the ID from database
+		name:        name,
+		slug:        slug,
+		description: description,
+		ownerID:     ownerID,
+		plan:        PlanFree,     // Default, should be stored in DB later
+		status:      StatusActive, // Default
+		settings:    settings,
+		limits:      limits,
+		createdAt:   time.Now().UTC(), // Ideally these should be parameters too
+		updatedAt:   time.Now().UTC(),
+	}, nil
+}

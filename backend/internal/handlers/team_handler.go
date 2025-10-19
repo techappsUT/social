@@ -7,6 +7,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -205,46 +206,108 @@ func (h *TeamHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 // InviteMember handles POST /api/v2/teams/:id/members
+// func (h *TeamHandler) InviteMember(w http.ResponseWriter, r *http.Request) {
+// 	userID, ok := middleware.GetUserID(r.Context())
+// 	if !ok {
+// 		respondError(w, http.StatusUnauthorized, "unauthorized")
+// 		return
+// 	}
+
+// 	teamIDStr := chi.URLParam(r, "id")
+// 	teamID, err := uuid.Parse(teamIDStr)
+// 	if err != nil {
+// 		respondError(w, http.StatusBadRequest, "invalid team ID")
+// 		return
+// 	}
+
+// 	var input team.InviteMemberInput
+// 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+// 		respondError(w, http.StatusBadRequest, "invalid request body")
+// 		return
+// 	}
+
+// 	input.TeamID = teamID
+// 	input.InviterID = userID
+
+// 	output, err := h.inviteMemberUC.Execute(r.Context(), input)
+// 	if err != nil {
+// 		// Handle different error types appropriately
+// 		switch {
+// 		case err.Error() == "access denied: only admins and owners can invite members":
+// 			respondError(w, http.StatusForbidden, err.Error())
+// 		case err.Error() == "user is already a team member":
+// 			respondError(w, http.StatusConflict, err.Error())
+// 		case err.Error() == "team member limit reached":
+// 			respondError(w, http.StatusForbidden, err.Error())
+// 		default:
+// 			respondError(w, http.StatusBadRequest, err.Error())
+// 		}
+// 		return
+// 	}
+
+// 	respondCreated(w, output)
+// }
+
 func (h *TeamHandler) InviteMember(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok {
-		respondError(w, http.StatusUnauthorized, "unauthorized")
+		// ✅ Consistent error with code and message
+		middleware.RespondUnauthorized(w, "Authentication required")
 		return
 	}
 
 	teamIDStr := chi.URLParam(r, "id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid team ID")
+		// ✅ Clear error code
+		middleware.RespondError(w, http.StatusBadRequest, "invalid_id", "Invalid team ID format")
 		return
 	}
 
-	var input team.InviteMemberInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
+	var requestBody struct {
+		Email string `json:"email" validate:"required,email"`
+		Role  string `json:"role" validate:"required,oneof=owner admin editor viewer"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		middleware.RespondError(w, http.StatusBadRequest, "invalid_json", "Invalid request body")
 		return
 	}
 
-	input.TeamID = teamID
-	input.InviterID = userID
+	// ✅ Validate with detailed field errors
+	if err := middleware.ValidateStruct(requestBody); err != nil {
+		fields := middleware.FormatValidationErrors(err)
+		middleware.RespondValidationError(w, "Request validation failed", fields)
+		return
+	}
+
+	input := team.InviteMemberInput{
+		TeamID:    teamID,
+		Email:     requestBody.Email,
+		Role:      teamDomain.MemberRole(requestBody.Role),
+		InviterID: userID,
+	}
 
 	output, err := h.inviteMemberUC.Execute(r.Context(), input)
 	if err != nil {
-		// Handle different error types appropriately
+		// ✅ Map domain errors to HTTP errors correctly
 		switch {
-		case err.Error() == "access denied: only admins and owners can invite members":
-			respondError(w, http.StatusForbidden, err.Error())
-		case err.Error() == "user is already a team member":
-			respondError(w, http.StatusConflict, err.Error())
-		case err.Error() == "team member limit reached":
-			respondError(w, http.StatusForbidden, err.Error())
+		case strings.Contains(err.Error(), "access denied"):
+			middleware.RespondForbidden(w, err.Error()) // ✅ 403
+		case strings.Contains(err.Error(), "limit reached"):
+			middleware.RespondError(w, http.StatusPaymentRequired, "limit_exceeded", err.Error()) // ✅ 402
+		case strings.Contains(err.Error(), "not found"):
+			middleware.RespondNotFound(w, "team") // ✅ 404
+		case strings.Contains(err.Error(), "already exists"):
+			middleware.RespondConflict(w, err.Error()) // ✅ 409
 		default:
-			respondError(w, http.StatusBadRequest, err.Error())
+			middleware.RespondInternalError(w, "Failed to invite member") // ✅ 500, safe message
 		}
 		return
 	}
 
-	respondCreated(w, output)
+	// ✅ Consistent success response
+	middleware.RespondCreated(w, output)
 }
 
 // RemoveMember handles DELETE /api/v2/teams/:id/members/:userId
@@ -295,36 +358,46 @@ func (h *TeamHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	respondNoContent(w)
 }
 
-// UpdateMemberRole handles PATCH /api/v2/teams/:id/members/:userId/role
 func (h *TeamHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
+	// ✅ Validate auth first
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok {
-		respondError(w, http.StatusUnauthorized, "unauthorized")
+		middleware.RespondUnauthorized(w, "Authentication required")
 		return
 	}
 
+	// ✅ Validate URL params
 	teamIDStr := chi.URLParam(r, "id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid team ID")
+		middleware.RespondError(w, http.StatusBadRequest, "invalid_id", "Invalid team ID format")
 		return
 	}
 
 	memberUserIDStr := chi.URLParam(r, "userId")
 	memberUserID, err := uuid.Parse(memberUserIDStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid user ID")
+		middleware.RespondError(w, http.StatusBadRequest, "invalid_id", "Invalid user ID format")
 		return
 	}
 
+	// ✅ Validate request body structure
 	var requestBody struct {
-		Role string `json:"role"`
+		Role string `json:"role" validate:"required,oneof=owner admin editor viewer"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
+		middleware.RespondError(w, http.StatusBadRequest, "invalid_json", "Invalid request body")
 		return
 	}
 
+	// ✅ Validate fields
+	if err := middleware.ValidateStruct(requestBody); err != nil {
+		fields := middleware.FormatValidationErrors(err)
+		middleware.RespondValidationError(w, "Request validation failed", fields)
+		return
+	}
+
+	// ✅ Only valid data reaches use case
 	input := team.UpdateMemberRoleInput{
 		TeamID:    teamID,
 		UserID:    memberUserID,
@@ -334,23 +407,9 @@ func (h *TeamHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 
 	output, err := h.updateMemberRoleUC.Execute(r.Context(), input)
 	if err != nil {
-		// Handle different error types appropriately
-		switch {
-		case err.Error() == "access denied: only team owner can change member roles":
-			respondError(w, http.StatusForbidden, err.Error())
-		case err.Error() == "cannot change your own role":
-			respondError(w, http.StatusForbidden, err.Error())
-		case err.Error() == "cannot demote the last owner":
-			respondError(w, http.StatusForbidden, err.Error())
-		case err.Error() == "cannot demote the last admin":
-			respondError(w, http.StatusForbidden, err.Error())
-		case err.Error() == "member not found":
-			respondError(w, http.StatusNotFound, err.Error())
-		default:
-			respondError(w, http.StatusBadRequest, err.Error())
-		}
+		// Handle errors...
 		return
 	}
 
-	respondSuccess(w, output)
+	middleware.RespondSuccess(w, output)
 }

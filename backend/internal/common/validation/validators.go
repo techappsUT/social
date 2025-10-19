@@ -39,24 +39,24 @@ func (e ValidationErrors) Error() string {
 // ============================================================================
 
 var (
-	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-	slugRegex  = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	urlRegex   = regexp.MustCompile(`^https?://[^\s/$.?#].[^\s]*$`)
+	// emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	urlRegex  = regexp.MustCompile(`^https?://[^\s/$.?#].[^\s]*$`)
 )
 
 // ValidateEmail checks if email is valid
-func ValidateEmail(email string) error {
-	if email == "" {
-		return &ValidationError{Field: "email", Message: "email is required"}
-	}
-	if !emailRegex.MatchString(email) {
-		return &ValidationError{Field: "email", Message: "invalid email format"}
-	}
-	if len(email) > 255 {
-		return &ValidationError{Field: "email", Message: "email too long (max 255 characters)"}
-	}
-	return nil
-}
+// func ValidateEmail(email string) error {
+// 	if email == "" {
+// 		return &ValidationError{Field: "email", Message: "email is required"}
+// 	}
+// 	if !emailRegex.MatchString(email) {
+// 		return &ValidationError{Field: "email", Message: "invalid email format"}
+// 	}
+// 	if len(email) > 255 {
+// 		return &ValidationError{Field: "email", Message: "email too long (max 255 characters)"}
+// 	}
+// 	return nil
+// }
 
 // ValidatePassword checks password requirements
 func ValidatePassword(password string) error {

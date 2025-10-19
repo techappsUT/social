@@ -11,6 +11,7 @@ import (
 func RegisterTeamRoutes(r chi.Router, h *handlers.TeamHandler, authMW *middleware.AuthMiddleware) {
 	r.Route("/teams", func(r chi.Router) {
 		r.Use(authMW.RequireAuth)
+		r.Use(middleware.ValidateRequest) // ✅ Add validation middleware
 
 		// Team CRUD
 		r.Get("/", h.ListTeams)

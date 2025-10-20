@@ -41,6 +41,7 @@ export async function getOAuthURL(
 export async function initiateOAuth(platform: SocialPlatform): Promise<void> {
   try {
     const { authUrl } = await getOAuthURL(platform);
+    console.log({authUrl})
     
     // Open OAuth in popup window (better UX than redirect)
     const width = 600;

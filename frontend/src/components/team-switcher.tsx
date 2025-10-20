@@ -27,7 +27,7 @@ export function TeamSwitcher() {
         <Button
           variant="outline"
           role="combobox"
-          className="w-[200px] justify-between"
+          className="w-full justify-between rounded-full mb-5 py-1.5"
         >
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4" />
@@ -36,7 +36,7 @@ export function TeamSwitcher() {
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-[200px]">
+      <DropdownMenuContent className="w-56" align='start'> 
         <DropdownMenuLabel>Your Teams</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {teams.map((team) => (

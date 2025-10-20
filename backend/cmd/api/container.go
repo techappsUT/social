@@ -309,7 +309,7 @@ func (c *Container) initializeSocialAdapters() error {
 
 	baseURL := os.Getenv("API_BASE_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:8000"
+		baseURL = fmt.Sprintf("http://localhost:%s", os.Getenv("PORT"))
 	}
 
 	// Twitter Adapter

@@ -29,6 +29,7 @@ import {
   Clock,
   CheckCircle2,
 } from 'lucide-react';
+import { TeamSwitcher } from '@/components/team-switcher';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -138,6 +139,8 @@ export default function DashboardPage() {
           Here's what's happening with your social media today.
         </p>
       </div>
+
+      <TeamSwitcher />
 
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

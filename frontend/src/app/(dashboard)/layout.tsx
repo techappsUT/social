@@ -38,6 +38,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TeamAccessCheck } from '@/components/auth/TeamAccessCheck';
+import { TeamProvider } from '@/contexts/team-context';
+import DashboardLayoutWrapper from '@/components/layouts/dashboard/wrapper';
 
 // ✅ UPDATED: Navigation items configuration with Teams added
 const navigation = [
@@ -162,6 +164,7 @@ export default function DashboardLayout({
   };
 
   return (
+    <DashboardLayoutWrapper>
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
@@ -455,10 +458,14 @@ export default function DashboardLayout({
         {/* Page content */}
         <div className="px-4 py-8 sm:px-6 lg:px-8">
           {/* <TeamAccessCheck> */}
+          {/* <TeamProvider> */}
+
           {children}
+          {/* </TeamProvider> */}
           {/* </TeamAccessCheck> */}
         </div>
       </main>
     </div>
+    </DashboardLayoutWrapper>
   );
 }

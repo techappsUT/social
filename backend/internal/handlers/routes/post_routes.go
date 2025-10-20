@@ -14,6 +14,7 @@ func RegisterPostRoutes(r chi.Router, h *handlers.PostHandler, authMW *middlewar
 
 		// Post CRUD
 		r.Post("/", h.CreateDraft)
+		r.Get("/", h.ListPosts)
 		r.Get("/{id}", h.GetPost)
 		r.Put("/{id}", h.UpdatePost)
 		r.Delete("/{id}", h.DeletePost)

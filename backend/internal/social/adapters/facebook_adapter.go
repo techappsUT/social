@@ -84,11 +84,11 @@ func (f *FacebookAdapter) AuthRedirect(ctx context.Context, state string, redire
 	// Request comprehensive permissions
 	// NOTE: Some permissions require App Review for production
 	scopes := []string{
-		"public_profile", // Basic profile info (auto-approved)
-		"email",          // User email (auto-approved)
-		// "pages_show_list",           // List user's pages (requires review)
-		// "pages_read_engagement",     // Read page data (requires review)
-		// "pages_manage_posts",        // Publish to pages (requires review)
+		// "public_profile", // Basic profile info (auto-approved)
+		"email",                 // User email (auto-approved)
+		"pages_show_list",       // List user's pages (requires review)
+		"pages_read_engagement", // Read page data (requires review)
+		"pages_manage_posts",    // Publish to pages (requires review)
 		// "pages_read_user_content",   // Read page posts (requires review)
 		// "instagram_basic",           // Instagram account access (requires review)
 		// "instagram_content_publish", // Post to Instagram (requires review)

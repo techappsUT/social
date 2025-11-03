@@ -5,7 +5,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -48,25 +52,27 @@ func NewSocialHandler(
 // GetOAuthURL handles GET /api/v2/social/auth/:platform
 func (h *SocialHandler) GetOAuthURL(w http.ResponseWriter, r *http.Request) {
 	platform := chi.URLParam(r, "platform")
-	state := r.URL.Query().Get("state")
 
+	// Get state from query params (sent by frontend)
+	state := r.URL.Query().Get("state")
 	if state == "" {
+		// Generate one if not provided (backward compatibility)
 		state = uuid.New().String()
 	}
 
-	// Get adapter
+	// Get the adapter
 	adapter, ok := h.adapters[socialDomain.Platform(platform)]
 	if !ok {
 		respondError(w, http.StatusBadRequest, "unsupported platform")
 		return
 	}
 
-	// Generate auth URL
+	// Generate auth URL with the provided state
 	authURL := adapter.GetAuthURL(state, []string{})
 
 	respondSuccess(w, map[string]string{
 		"authUrl": authURL,
-		"state":   state,
+		"state":   state, // Return the same state
 	})
 }
 
@@ -75,18 +81,35 @@ func (h *SocialHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	platform := chi.URLParam(r, "platform")
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
+	errorParam := r.URL.Query().Get("error")
 
-	if code == "" {
-		respondError(w, http.StatusBadRequest, "missing authorization code")
+	// Get frontend URL from environment
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3001"
+	}
+
+	// Handle OAuth errors (user denied, etc.)
+	if errorParam != "" {
+		errorDesc := r.URL.Query().Get("error_description")
+		redirectURL := fmt.Sprintf("%s/accounts?error=%s&description=%s",
+			frontendURL, errorParam, url.QueryEscape(errorDesc))
+		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 		return
 	}
 
-	// Return code and state to frontend for connection
-	respondSuccess(w, map[string]string{
-		"code":     code,
-		"state":    state,
-		"platform": platform,
-	})
+	if code == "" {
+		redirectURL := fmt.Sprintf("%s/accounts?error=missing_code", frontendURL)
+		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		return
+	}
+
+	// Redirect to frontend with code and state
+	// The frontend will then make an authenticated API call to complete the connection
+	redirectURL := fmt.Sprintf("%s/accounts/callback?platform=%s&code=%s&state=%s",
+		frontendURL, platform, url.QueryEscape(code), url.QueryEscape(state))
+
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
 // ConnectAccount handles POST /api/v2/social/accounts
@@ -166,9 +189,11 @@ func (h *SocialHandler) DisconnectAccount(w http.ResponseWriter, r *http.Request
 	}
 
 	accountIDStr := chi.URLParam(r, "id")
+	fmt.Printf("Disconnecting account: %s for user: %s\n", accountIDStr, userID)
+
 	accountID, err := uuid.Parse(accountIDStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid account ID")
+		respondError(w, http.StatusBadRequest, "invalid account ID format")
 		return
 	}
 
@@ -178,7 +203,10 @@ func (h *SocialHandler) DisconnectAccount(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.disconnectUC.Execute(r.Context(), input); err != nil {
-		if err.Error() == "access denied: not a team member" {
+		fmt.Printf("Disconnect error: %v\n", err)
+		if strings.Contains(err.Error(), "not found") {
+			respondError(w, http.StatusNotFound, "Account not found")
+		} else if strings.Contains(err.Error(), "access denied") {
 			respondError(w, http.StatusForbidden, err.Error())
 		} else {
 			respondError(w, http.StatusBadRequest, err.Error())
@@ -186,7 +214,8 @@ func (h *SocialHandler) DisconnectAccount(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	respondNoContent(w)
+	// Return 204 No Content for successful deletion
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // RefreshTokens handles POST /api/v2/social/accounts/:id/refresh
@@ -286,4 +315,60 @@ func (h *SocialHandler) GetAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondSuccess(w, output)
+}
+
+// CompleteOAuthConnection handles POST /api/v2/social/auth/complete
+func (h *SocialHandler) CompleteOAuthConnection(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var input struct {
+		Platform string `json:"platform"`
+		Code     string `json:"code"`
+		State    string `json:"state"`
+		TeamID   string `json:"teamId,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		// Remove logger, just respond with error
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Debug print without logger
+	fmt.Printf("CompleteOAuth request: platform=%s, hasCode=%v, hasState=%v, teamId=%s\n",
+		input.Platform, input.Code != "", input.State != "", input.TeamID)
+
+	// Parse TeamID
+	var teamID uuid.UUID
+	if input.TeamID != "" {
+		parsed, err := uuid.Parse(input.TeamID)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid team ID format")
+			return
+		}
+		teamID = parsed
+	} else {
+		respondError(w, http.StatusBadRequest, "team ID is required")
+		return
+	}
+
+	// Prepare use case input
+	ucInput := appSocial.ConnectAccountInput{
+		UserID:   userID,
+		TeamID:   teamID,
+		Platform: socialDomain.Platform(input.Platform),
+		Code:     input.Code,
+	}
+
+	output, err := h.connectAccountUC.Execute(r.Context(), ucInput)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondCreated(w, output)
 }

@@ -1,5 +1,5 @@
 // frontend/src/lib/api-client.ts
-// WORKING VERSION - No CORS issues
+// COMPLETE VERSION - Handles 204 No Content and DELETE operations
 
 import type { AuthResponse } from '@/types/auth';
 
@@ -57,6 +57,11 @@ class ApiClient {
       credentials: 'include', // Include cookies (for refresh token)
     });
 
+    // Handle 204 No Content (successful DELETE/UPDATE with no return data)
+    if (response.status === 204) {
+      return {} as T; // Return empty object for successful operations with no content
+    }
+
     // Handle 401 Unauthorized - attempt token refresh
     if (response.status === 401 && !skipRefresh && !skipAuth) {
       return this.handleUnauthorized(endpoint, options);
@@ -64,17 +69,35 @@ class ApiClient {
 
     // Handle other errors
     if (!response.ok) {
-      const error = await response.json().catch(() => ({
-        error: 'Request failed',
-        message: response.statusText,
-      }));
-      throw new Error(error.error || error.message || 'Request failed');
+      // Try to parse error response
+      const errorText = await response.text();
+      let errorData;
+      
+      try {
+        errorData = errorText ? JSON.parse(errorText) : { error: response.statusText };
+      } catch {
+        errorData = { error: errorText || response.statusText };
+      }
+      
+      throw new Error(errorData.error || errorData.message || response.statusText);
     }
 
-    // Parse response
-    const responseData: BackendResponse<T> = await response.json();
+    // Handle empty responses (some endpoints might return empty on success)
+    const responseText = await response.text();
+    if (!responseText) {
+      return {} as T;
+    }
+
+    // Parse JSON response
+    let responseData: BackendResponse<T>;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (error) {
+      console.error('Failed to parse response as JSON:', responseText);
+      throw new Error('Invalid JSON response from server');
+    }
     
-    // ✅ FIX: Unwrap backend response format
+    // Unwrap backend response format
     // If the response has 'data' field and 'success' field, unwrap it
     if ('success' in responseData && 'data' in responseData) {
       return responseData.data as T;
@@ -163,6 +186,8 @@ class ApiClient {
 
   clearAuth(): void {
     localStorage.removeItem('accessToken');
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('userId');
     // Refresh token is cleared via cookie on logout
   }
 
@@ -209,7 +234,7 @@ class ApiClient {
     });
   }
 
-  delete<T>(endpoint: string, options?: RequestOptions): Promise<T> {
+  delete<T = void>(endpoint: string, options?: RequestOptions): Promise<T> {
     return this.request<T>(endpoint, { ...options, method: 'DELETE' });
   }
 }

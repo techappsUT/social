@@ -7,6 +7,7 @@ package social
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/techappsUT/social-queue/internal/adapters/social"
@@ -105,10 +106,32 @@ func (uc *ConnectAccountUseCase) Execute(ctx context.Context, input ConnectAccou
 		PlatformUserID: token.PlatformUserID, // Store platform user ID
 	}
 
+	// // 8. Create profile info (simplified - in production, call platform API)
+	// profile := socialDomain.ProfileInfo{
+	// 	Username:    fmt.Sprintf("user_%s", token.PlatformUserID[:8]),
+	// 	DisplayName: fmt.Sprintf("User %s", token.PlatformUserID[:8]),
+	// 	ProfileURL:  "",
+	// 	AvatarURL:   "",
+	// }
+
+	// Line 109-111 - Fix the slice bounds error
 	// 8. Create profile info (simplified - in production, call platform API)
+	var username, displayName string
+	if token.PlatformUserID != "" && len(token.PlatformUserID) >= 8 {
+		username = fmt.Sprintf("user_%s", token.PlatformUserID[:8])
+		displayName = fmt.Sprintf("User %s", token.PlatformUserID[:8])
+	} else if token.PlatformUserID != "" {
+		username = fmt.Sprintf("user_%s", token.PlatformUserID)
+		displayName = fmt.Sprintf("User %s", token.PlatformUserID)
+	} else {
+		// Fallback when PlatformUserID is empty
+		username = fmt.Sprintf("user_%s_%d", input.Platform, time.Now().Unix())
+		displayName = fmt.Sprintf("%s User", input.Platform)
+	}
+
 	profile := socialDomain.ProfileInfo{
-		Username:    fmt.Sprintf("user_%s", token.PlatformUserID[:8]),
-		DisplayName: fmt.Sprintf("User %s", token.PlatformUserID[:8]),
+		Username:    username,
+		DisplayName: displayName,
 		ProfileURL:  "",
 		AvatarURL:   "",
 	}
